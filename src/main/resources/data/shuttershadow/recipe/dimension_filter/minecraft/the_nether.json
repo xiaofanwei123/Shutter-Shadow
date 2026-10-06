@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "GGG",
+    "GOG",
+    "GGG"
+  ],
+  "key": {
+    "G": { "item": "minecraft:glass" },
+    "O": { "item": "minecraft:obsidian" }
+  },
+  "result": {
+    "id": "shuttershadow:dimension_filter",
+    "count": 1,
+    "components": {
+      "shuttershadow:dimension_filter_target": "minecraft:the_nether"
+    }
+  }
+}

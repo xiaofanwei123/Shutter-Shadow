@@ -1,0 +1,23 @@
+{
+  "predicate": {
+    "items": "shuttershadow:dimension_filter",
+    "components": {
+      "shuttershadow:dimension_filter_target": "minecraft:the_nether"
+    },
+    "predicates": {
+      "shuttershadow:camera_dimension": {
+        "routes": {
+          "minecraft:overworld": {
+            "target_dimension": "minecraft:the_nether",
+            "coordinate_scale": 8.0
+          },
+          "minecraft:the_end": {
+            "target_dimension": "minecraft:the_nether",
+            "coordinate_scale": 8.0
+          }
+        }
+      }
+    }
+  },
+  "shader": "shuttershadow:shaders/post/neutral.json"
+}

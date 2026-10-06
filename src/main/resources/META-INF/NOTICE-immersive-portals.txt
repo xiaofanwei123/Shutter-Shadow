@@ -1,0 +1,1 @@
+Shuttershadow 的跨维度内核移植并修改自 Immersive Portals for NeoForge（https://github.com/iPortalTeam/ImmersivePortalsModForNeo，v6.0.7，提交 aede93a4865fe4aab5dd2781fb38ab3e5cecd63b），原作者为 qouteall、Nick1st 及上游贡献者。移植部分遵循 Apache-2.0，不受本模组原创部分 All Rights Reserved 声明限制；本项目已调整包名、网络和渲染实现，删除传送门相关功能，保留相机跨维度观察、同步及无缝传送能力。

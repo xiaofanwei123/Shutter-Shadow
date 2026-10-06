@@ -1,0 +1,7 @@
+{
+  "replace": false,
+  "values": [
+    "shuttershadow:player_dimension_film",
+    "shuttershadow:mob_dimension_film"
+  ]
+}
