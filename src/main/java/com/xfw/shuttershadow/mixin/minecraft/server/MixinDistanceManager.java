@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
@@ -17,6 +17,7 @@ import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTickets;
 import com.xfw.shuttershadow.access.IEChunkMap;
 import com.xfw.shuttershadow.core.CoreConfig;
 
+/** 修复玩家移除时的空集合，并分批刷新相机加载票据。 */
 @Mixin(DistanceManager.class)
 public abstract class MixinDistanceManager {
     
@@ -24,7 +25,8 @@ public abstract class MixinDistanceManager {
     @Final
     private Long2ObjectMap<ObjectSet<ServerPlayer>> playersPerChunk;
     
-    // avoid NPE
+    // 避免空引用。
+    /** 确保原版移除玩家时对应区块追踪集合存在，避免空引用。 */
     @Inject(method = "Lnet/minecraft/server/level/DistanceManager;removePlayer(Lnet/minecraft/core/SectionPos;Lnet/minecraft/server/level/ServerPlayer;)V", at = @At("HEAD"))
     private void onHandleChunkLeave(
         SectionPos sectionPos,
@@ -35,6 +37,7 @@ public abstract class MixinDistanceManager {
         playersPerChunk.computeIfAbsent(chunkPos, k -> new ObjectOpenHashSet<>());
     }
     
+    /** 分批提交相机额外区块票据，优先加载近处区块。 */
     @Inject(
         method = "runAllUpdates",
         at = @At("RETURN")

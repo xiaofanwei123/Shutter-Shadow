@@ -16,15 +16,17 @@ import net.neoforged.neoforge.client.model.BakedModelWrapper;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Selects a resource-pack model by the dimension ID stored on a filter stack. */
+/** 资源重载时扫描目标维度滤镜独立模型，以目标组件挑选变体。 */
 public final class DimensionFilterModels {
     private static final String MODEL_DIRECTORY = "models/item/dimension_filter";
     private static final String MODEL_PREFIX = "item/dimension_filter/";
     private static Map<ResourceLocation, ModelResourceLocation> modelLocations = Map.of();
 
+    /** 禁止实例化此工具类。 */
     private DimensionFilterModels() {
     }
 
+    /** 扫描本命名空间models/item/dimensio_filter中的JSON，把<维度命名空间>/<路径>解析为维度ID并注册额外模型。 */
     public static void registerModels(ModelEvent.RegisterAdditional event) {
         Map<ResourceLocation, ModelResourceLocation> found = new HashMap<>();
         Minecraft.getInstance().getResourceManager()
@@ -49,6 +51,7 @@ public final class DimensionFilterModels {
         modelLocations = Map.copyOf(found);
     }
 
+    /** 在烘焙结果中收集已找到变体，用带ItemOverrides的wrapper替换滤镜inventory模型。 */
     public static void selectModel(ModelEvent.ModifyBakingResult event) {
         ModelResourceLocation filterLocation = ModelResourceLocation.inventory(Shuttershadow.DIMENSION_FILTER.getId());
         BakedModel base = event.getModels().get(filterLocation);
@@ -60,8 +63,9 @@ public final class DimensionFilterModels {
             if (model != null) variants.put(dimension, model);
         });
 
-        event.getModels().put(filterLocation, new BakedModelWrapper<>(base) {
-            private final ItemOverrides overrides = new ItemOverrides() {
+        event.getModels().put(filterLocation, new BakedModelWrapper<>(base) /** 包住滤镜基础BakedModel的匿名模型，保留父模型几何仅改变变体选择。 */ {
+            private final ItemOverrides overrides = new ItemOverrides() /** 按滤镜目标组件选择模型的匿名ItemOverrides。 */ {
+                /** 读取目标维度，存在已烘焙变体则用它，否则回退基础模型。 */
                 @Override
                 public BakedModel resolve(BakedModel model, ItemStack stack, ClientLevel level,
                         LivingEntity entity, int seed) {
@@ -70,6 +74,7 @@ public final class DimensionFilterModels {
                 }
             };
 
+            /** 返回本wrapper持有的ItemOverrides。 */
             @Override
             public ItemOverrides getOverrides() {
                 return overrides;

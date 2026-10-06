@@ -14,29 +14,32 @@ import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
-/** Confirms the IP client-side dimension switch before Exposure captures. */
+/** 玩家胶卷客户端事务确认及个人支架传送偏好同步。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID, value = Dist.CLIENT)
 public final class DimensionFilmClient {
     private static long pendingTransaction = Long.MIN_VALUE;
     private static ResourceLocation pendingDimension;
     private static Boolean lastSentStandPreference;
 
+    /** 禁止实例化此工具类。 */
     private DimensionFilmClient() {
     }
 
+    /** 保存服务器事务和目标维度，立即尝试确认真实世界是否已切换。 */
     public static void start(DimensionFilmStartS2C message) {
         pendingTransaction = message.transaction();
         pendingDimension = message.dimension();
         tryReady();
     }
 
+    /** 每tick同步变更的支架同意状态，并重试传送确认。 */
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
         syncStandPreference();
         tryReady();
     }
 
-    /** Sends the local config once after joining and again only when it changes. */
+    /** 只有连接/玩家存在且配置值变化才发StandTeleportPreferenceC2S。 */
     private static void syncStandPreference() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || minecraft.getConnection() == null) return;
@@ -48,6 +51,7 @@ public final class DimensionFilmClient {
         }
     }
 
+    /** Minecraft当前真实世界等于事务目标时，先清等待状态再发送DimensionFilmReadyC2S。 */
     private static void tryReady() {
         if (pendingDimension == null) return;
         Minecraft minecraft = Minecraft.getInstance();
@@ -61,6 +65,7 @@ public final class DimensionFilmClient {
         PacketDistributor.sendToServer(new DimensionFilmReadyC2S(transaction));
     }
 
+    /** 登出清事务、目标及上次发送偏好。 */
     @SubscribeEvent
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         pendingTransaction = Long.MIN_VALUE;

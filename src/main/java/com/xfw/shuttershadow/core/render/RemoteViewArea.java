@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.render;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.client.Minecraft;
@@ -31,22 +31,27 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.function.LongConsumer;
 
+/** 为原版渲染器管理多个相机中心的区段网格。 */
 @OnlyIn(Dist.CLIENT)
 public class RemoteViewArea extends ViewArea {
 
+    /** 保存单个水平区块的全部渲染区段与最近活跃时间。 */
     public static class Column {
         public long mark = 0;
         public RenderSection[] sections;
 
+        /** 保存该区块的渲染区段数组。 */
         public Column(RenderSection[] sections) {
             this.sections = sections;
         }
     }
 
+    /** 保存相机中心对应的渲染区段索引和最近活跃时间。 */
     public static class Preset {
         public final RenderSection[] data;
         public long lastActiveTime = 0;
 
+        /** 保存索引数组。 */
         public Preset(
                 RenderSection[] data
         ) {
@@ -63,7 +68,7 @@ public class RemoteViewArea extends ViewArea {
 
     private boolean isAlive = true;
 
-    /** 区块缓存完成原版和 Sodium 卸载后，同步重置此维度的网格。 */
+    /** 区块卸载时，重置对应远景渲染区段。 */
     public static void onClientChunkUnload(LevelChunk chunk) {
         ResourceKey<Level> dimension = chunk.getLevel().dimension();
         LevelRenderer worldRenderer = ClientWorldLoader.WORLD_RENDERER_MAP.get(dimension);
@@ -76,6 +81,7 @@ public class RemoteViewArea extends ViewArea {
         }
     }
 
+    /** 客户端游戏刻结束后清理各维度过期的远景视区。 */
     public static void init() {
         NeoForge.EVENT_BUS.addListener(CoreSettings.PostClientTickEvent.class, postClientTickEvent -> {
             if (ClientWorldLoader.getIsInitialized()) {
@@ -91,6 +97,7 @@ public class RemoteViewArea extends ViewArea {
         });
     }
 
+    /** 初始化视区，保存区段创建方式与世界高度边界。 */
     public RemoteViewArea(
             SectionRenderDispatcher sectionBuilder,
             Level world,
@@ -104,13 +111,15 @@ public class RemoteViewArea extends ViewArea {
         endSectionY = McHelper.getMaxSectionYExclusive(world);
     }
 
+    /** 创建视区索引，渲染区段按需生成。 */
     @Override
     protected void createSections(SectionRenderDispatcher sectionBuilder_1) {
-        // WorldRenderer#reload() reads its size
+        // 原版世界渲染器重载时会读取此数组长度。
         int num = this.sectionGridSizeX * this.sectionGridSizeY * this.sectionGridSizeZ;
         sections = new RenderSection[num];
     }
 
+    /** 释放所有区段网格缓冲，并清空视区缓存。 */
     @Override
     public void releaseAllBuffers() {
         // 列才是 RenderSection 的所有者；远景 rawFetch 创建的列可能不属于任何预设。
@@ -125,10 +134,7 @@ public class RemoteViewArea extends ViewArea {
         isAlive = false;
     }
 
-    /**
-     * It will only be called during vanilla outer world rendering
-     * Won't be called in portal rendering
-     */
+    /** 取得或创建相机中心的视区预设，并切换当前区段索引。 */
     @Override
     public void repositionCamera(double playerX, double playerZ) {
         Minecraft.getInstance().getProfiler().push("built_section_storage");
@@ -155,12 +161,14 @@ public class RemoteViewArea extends ViewArea {
         Minecraft.getInstance().getProfiler().pop();
     }
 
+    /** 根据真实区段坐标标记网格需要重建。 */
     @Override
     public void setDirty(int cx, int cy, int cz, boolean isImportant) {
         RenderSection builtChunk = provideBuiltChunkByChunkPos(cx, cy, cz);
         builtChunk.setDirty(isImportant);
     }
 
+    /** 根据水平区块和合法高度取得渲染区段。 */
     public RenderSection provideBuiltChunkByChunkPos(int cx, int cy, int cz) {
         Column column = provideColumn(ChunkPos.asLong(cx, cz));
         int offsetChunkY = Mth.clamp(
@@ -169,9 +177,7 @@ public class RemoteViewArea extends ViewArea {
         return column.sections[offsetChunkY];
     }
 
-    /**
-     * {@link ViewArea#repositionCamera(double, double)}
-     */
+    /** 为相机中心建立环形区段索引，保留已有区段的真实坐标。 */
     private Preset createPresetByChunkPos(int sectionX, int sectionZ) {
         RenderSection[] sections1 =
                 new RenderSection[this.sectionGridSizeX * this.sectionGridSizeY * this.sectionGridSizeZ];
@@ -201,9 +207,7 @@ public class RemoteViewArea extends ViewArea {
         return new Preset(sections1);
     }
 
-    /**
-     * {@link ViewArea#repositionCamera(double, double)}
-     */
+    /** 遍历视区预设覆盖的水平区块，标记活跃区块列。 */
     private void foreachPresetCoveredChunkPoses(
             int centerChunkX, int centerChunkZ,
             LongConsumer func
@@ -228,15 +232,18 @@ public class RemoteViewArea extends ViewArea {
         }
     }
 
-    //copy because private
+    // 原版对应方法为私有方法，此处保留等效实现。
+    /** 将三维网格坐标转换为数组索引。 */
     private int getChunkIndex(int x, int y, int z) {
         return (z * this.sectionGridSizeY + y) * this.sectionGridSizeX + x;
     }
 
+    /** 根据水平区块坐标取得或创建区块列。 */
     public Column provideColumn(long sectionPos) {
         return columnMap.computeIfAbsent(sectionPos, this::createColumn);
     }
 
+    /** 创建覆盖世界完整高度的渲染区段列。 */
     private Column createColumn(long sectionPos) {
         RenderSection[] array = new RenderSection[sectionGridSizeY];
 
@@ -257,6 +264,7 @@ public class RemoteViewArea extends ViewArea {
         return new Column(array);
     }
 
+    /** 定期清理活跃视区中的过期缓存。 */
     private void tick() {
         if (!isAlive) {
             return;
@@ -276,6 +284,7 @@ public class RemoteViewArea extends ViewArea {
         }
     }
 
+    /** 清理过期视区预设和不再被使用的区段列。 */
     private void purge() {
         Minecraft.getInstance().getProfiler().push("my_built_section_storage_purge");
 
@@ -339,6 +348,7 @@ public class RemoteViewArea extends ViewArea {
         Minecraft.getInstance().getProfiler().pop();
     }
 
+    /** 保留当前视区预设，判断其他预设是否已经过期。 */
     private boolean shouldDropPreset(long dropTime, long currentTime, Preset preset) {
         if (preset.data == this.sections) {
             return false;
@@ -346,6 +356,7 @@ public class RemoteViewArea extends ViewArea {
         return currentTime - preset.lastActiveTime > dropTime;
     }
 
+    /** 重置区块列的全部区段，取消任务并清空网格状态。 */
     public void onChunkUnload(int sectionX, int sectionZ) {
         long sectionPos = ChunkPos.asLong(sectionX, sectionZ);
         Column column = columnMap.get(sectionPos);
@@ -356,7 +367,8 @@ public class RemoteViewArea extends ViewArea {
         }
     }
 
-    // NOTE it may be accessed from another thread
+    // 此数据可能被其他线程访问。
+    /** 将方块位置转换为当前视区的环形索引。 */
     @Nullable
     @Override
     protected RenderSection getRenderSectionAt(BlockPos pos) {
@@ -381,6 +393,7 @@ public class RemoteViewArea extends ViewArea {
         }
     }
 
+    /** 按真实坐标取得渲染区段，并更新区块列的活跃时间。 */
     @Nullable
     public RenderSection rawFetch(int cx, int cy, int cz, long timeMark) {
         if (cy < minSectionY || cy >= endSectionY) {

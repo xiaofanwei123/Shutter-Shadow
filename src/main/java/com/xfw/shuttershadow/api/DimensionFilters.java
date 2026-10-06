@@ -12,56 +12,50 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/** 维度滤镜、数据包路由与坐标换算的公共入口；不启动相机或加载区块。 */
+/** 公开滤镜组件/来源路由/坐标映射API。 */
 public final class DimensionFilters {
+    /** 禁止实例化此工具类。 */
     private DimensionFilters() {}
 
-    /** 创建指定目标的滤镜；resolve 检查路由，目标世界是否存在由调用者检查。 */
+    /** 创建本模组滤镜并写非null目标维度组件。 */
     public static ItemStack create(ResourceLocation targetDimension) {
         ItemStack stack = Shuttershadow.DIMENSION_FILTER.get().getDefaultInstance();
         stack.set(Shuttershadow.DIMENSION_FILTER_TARGET.get(), Objects.requireNonNull(targetDimension));
         return stack;
     }
 
-    /** 读取本模组滤镜携带的目标；普通滤镜或未指定目标时返回 null。 */
+    /** 仅本模组滤镜返回目标组件，其他物品或null返回null。 */
     public static @Nullable ResourceLocation target(ItemStack filter) {
         return filter != null && filter.is(Shuttershadow.DIMENSION_FILTER.get())
                 ? filter.get(Shuttershadow.DIMENSION_FILTER_TARGET.get()) : null;
     }
 
-    /**
-     * 解析当前来源的实际路由；支持 Exposure 数据包中的自定义滤镜谓词。
-     * 注册表未准备好或没有匹配谓词时沿用本模组的本地配置回退。
-     * 路由不保证目标世界已注册或区块已加载，调用者应自行检查。
-     */
+    /** 委托DimensionCameraConfig以注册表优先、本地JSON兜底解析路由。 */
     public static @Nullable Route resolve(@Nullable RegistryAccess registries, ItemStack filter,
                                          ResourceLocation sourceDimension) {
         return DimensionCameraConfig.resolve(registries, filter, sourceDimension);
     }
 
-    /** 返回实际的 X/Z 倍率；省略数据包 coordinate_scale 时使用目标维度类型。 */
+    /** 路由有有限比例时以来源维度类型比例除该值，否则用原版两世界传送比例。 */
     public static double horizontalScale(@Nullable Route route, Level source, Level target) {
         return route != null && Double.isFinite(route.coordinateScale())
                 ? source.dimensionType().coordinateScale() / route.coordinateScale()
                 : DimensionType.getTeleportationScale(source.dimensionType(), target.dimensionType());
     }
 
-    /** 绝对坐标只缩放 X/Z，保留脚下的 Y 坐标；scale 使用 horizontalScale 的结果。 */
+    /** 按scale缩放X/Z，Y保持原值。 */
     public static Vec3 mapAbsolute(Vec3 position, double scale) {
         return new Vec3(position.x * scale, position.y, position.z * scale);
     }
 
-    /** 映射相对于源基准的位移；Y 只叠加位移和相机高度偏移。 */
+    /** 把delta的X/Z按scale缩放，加targetOrigin，Y加delta.y与yOffset。 */
     public static Vec3 mapRelative(Vec3 delta, Vec3 targetOrigin, double scale, double yOffset) {
         return targetOrigin.add(delta.x * scale, delta.y + yOffset, delta.z * scale);
     }
 
-    /**
-     * 一个已选中的不可变路由。filter 是滤镜物品注册 ID，不是 Exposure 数据条目 ID。
-     * coordinateScale 是目标坐标比例（下界为 8），
-     * 而非实际 X/Z 倍率；NaN 表示采用已注册的目标维度类型。
-     */
+    /** 解析后的滤镜物品ID、目标维度ID及目标比例记录。 */
     public record Route(ResourceLocation filter, ResourceLocation dimension, double coordinateScale) {
+        /** 紧凑构造器要求filter/dimension非null，比例必须正有限或NaN自动标记。 */
         public Route {
             Objects.requireNonNull(filter, "filter");
             Objects.requireNonNull(dimension, "dimension");

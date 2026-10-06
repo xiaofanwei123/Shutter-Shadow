@@ -10,9 +10,10 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-/** 保留原版发送、节流和回执，仅避免卸载仍被相机订阅的源区块。 */
+/** 避免原版卸载仍被相机订阅使用的客户端区块。 */
 @Mixin(PlayerChunkSender.class)
 public class MixinPlayerChunkSender {
+    /** 仍被相机订阅的区块不发送卸载包。 */
     @Redirect(method = "dropChunk", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;send(Lnet/minecraft/network/protocol/Packet;)V"))
     private void shuttershadow$keepCameraChunk(ServerGamePacketListenerImpl connection, Packet<?> packet,

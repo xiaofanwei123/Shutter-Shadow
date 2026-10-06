@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.chunk_loading;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
@@ -15,7 +15,9 @@ import com.xfw.shuttershadow.network.PacketRedirection;
 
 import java.util.Set;
 
+/** 向远程维度观察者同步目标世界的时间与天气。 */
 public class WorldInfoSender {
+    /** 定期向玩家同步所观察的远程维度信息。 */
     public static void init() {
         NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class, event -> {
             event.getServer().getProfiler().push("shuttershadow_send_camera_world_info");
@@ -35,7 +37,8 @@ public class WorldInfoSender {
         });
     }
 
-    //send the daytime and weather info to player when player is in nether
+    // 玩家在下界时仍同步所观察维度的时间与天气。
+    /** 按目标维度发送时间和天气状态包。 */
     public static void sendWorldInfo(ServerPlayer player, ServerLevel world) {
         ResourceKey<Level> remoteDimension = world.dimension();
 
@@ -51,7 +54,7 @@ public class WorldInfoSender {
                 )
         );
 
-        /**{@link net.minecraft.client.network.ClientPlayNetworkHandler#onGameStateChange(GameStateChangeS2CPacket)}*/
+        /** 使用游戏状态变化包同步目标维度天气。 */
 
         if (world.isRaining()) {
             PacketRedirection.sendRedirectedMessage(
@@ -63,8 +66,8 @@ public class WorldInfoSender {
                     )
             );
         } else {
-            //if the weather is already not raining when the player logs in then no need to sync
-            //if the weather turned to not raining then elsewhere syncs it
+            // 玩家登录时未下雨，无需发送额外的停雨同步。
+            // 天气转为停雨时，由其他同步流程发送更新。
         }
 
         PacketRedirection.sendRedirectedMessage(

@@ -26,6 +26,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.core.registries.Registries;
 import org.slf4j.Logger;
 
+/** NeoForge模组入口。 */
 @Mod(Shuttershadow.MODID)
 public class Shuttershadow {
     public static final String MODID = "shuttershadow";
@@ -38,24 +39,24 @@ public class Shuttershadow {
     public static final DeferredRegister<ItemSubPredicate.Type<?>> ITEM_SUB_PREDICATES =
             DeferredRegister.create(Registries.ITEM_SUB_PREDICATE_TYPE, MODID);
 
-    /** Target dimension stored on every dimension filter variant. */
+    /** 保存各维度滤镜变体的目标维度。 */
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<ResourceLocation>>
             DIMENSION_FILTER_TARGET = DATA_COMPONENTS.registerComponentType(
                     "dimension_filter_target",
                     builder -> builder.persistent(ResourceLocation.CODEC)
                             .networkSynchronized(ResourceLocation.STREAM_CODEC));
 
-    /** One Exposure filter item; its target dimension is supplied by the component above. */
+    /** 所有维度滤镜共用一个物品，目标维度由组件指定。 */
     public static final DeferredItem<DimensionFilterItem> DIMENSION_FILTER = ITEMS.register(
             "dimension_filter", () -> new DimensionFilterItem(new Item.Properties().stacksTo(1)));
-    /** A color film roll that opts into the physical player dimension-film transaction. */
+    /** 参与玩家跨维度传送事务的彩色胶卷。 */
     public static final DeferredItem<PlayerDimensionFilmRollItem> PLAYER_DIMENSION_FILM = ITEMS.register(
             "player_dimension_film", () -> new PlayerDimensionFilmRollItem(new Item.Properties().stacksTo(16)));
-    /** A color film roll that transfers the first creature photographed in the target dimension. */
+    /** 将目标维度首个出镜生物带回的彩色胶卷。 */
     public static final DeferredItem<MobDimensionFilmRollItem> MOB_DIMENSION_FILM = ITEMS.register(
             "mob_dimension_film", () -> new MobDimensionFilmRollItem(new Item.Properties().stacksTo(16)));
 
-    /** Exposure predicate type carrying source-to-target camera routes. */
+    /** 携带来源维度到目标维度路由的物品谓词类型。 */
     public static final java.util.function.Supplier<ItemSubPredicate.Type<DimensionCameraPredicate>>
             DIMENSION_CAMERA_PREDICATE = ITEM_SUB_PREDICATES.register(
                     "camera_dimension", () -> new ItemSubPredicate.Type<>(DimensionCameraPredicate.CODEC));
@@ -89,6 +90,7 @@ public class Shuttershadow {
                     })
                     .build());
 
+    /** 注册COMMON内核、SERVER玩法、CLIENT个人偏好配置及物品等DeferredRegister，再启动通用内核与客户端内核。 */
     public Shuttershadow(IEventBus modEventBus, ModContainer modContainer) {
         CoreConfig.register(modContainer, modEventBus);
         modContainer.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER,
@@ -101,22 +103,22 @@ public class Shuttershadow {
         CREATIVE_MODE_TABS.register(modEventBus);
         ITEM_SUB_PREDICATES.register(modEventBus);
 
-        // Embedded runtime bootstrap: all common hooks and payloads must be registered
-        // before client-only remote-world/render initialization.
+        // 先注册通用运行时钩子与数据包，
+        // 再初始化客户端远维度世界和渲染。
         DimensionRuntime.init(modEventBus);
         if (FMLEnvironment.dist == Dist.CLIENT) {
             DimensionRuntimeClient.init();
         }
     }
 
-    /** Registers the config screen without loading client-only classes on a dedicated server. */
+    /** 只在客户端反射调用ShuttershadowClient.init注册原生配置界面，防止专用服务端加载客户端类型。 */
     private static void registerClientConfigScreen(IEventBus modEventBus, ModContainer modContainer) {
         if (FMLEnvironment.dist != Dist.CLIENT) return;
         try {
             Class<?> client = Class.forName("com.xfw.shuttershadow.client.ShuttershadowClient");
             client.getMethod("init", IEventBus.class, ModContainer.class).invoke(null, modEventBus, modContainer);
         } catch (ClassNotFoundException ignored) {
-            // Dedicated server: no client configuration screen is available.
+            // 专用服务端无需注册客户端配置界面。
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Unable to register Shuttershadow config screen", exception);
         }

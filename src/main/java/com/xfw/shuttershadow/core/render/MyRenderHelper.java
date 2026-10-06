@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.render;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -21,11 +21,12 @@ import com.xfw.shuttershadow.core.render.RenderStates;
 import static org.lwjgl.opengl.GL11.GL_BACK;
 import static org.lwjgl.opengl.GL11.glCullFace;
 
+/** 目标场景帧缓冲/雾填充、远光照更新及GPU上传时序辅助。 */
 public class MyRenderHelper {
     
     public static final Minecraft client = Minecraft.getInstance();
 
-    /** 相机远景用维度雾色填满当前目标，原版画面保留原清屏方式。 */
+    /** 在相机远景中用目标维度雾色清空画面，并恢复深度写入状态。 */
     public static boolean replaceFrameBufferClearing() {
         if (!WorldRenderInfo.isRendering()) {
             return false;
@@ -38,11 +39,12 @@ public class MyRenderHelper {
     
     
     
-    // vanilla hardcodes the shader namespace to be "minecraft"
+    // 原版将着色器命名空间固定为游戏自身的命名空间。
     
     
     
     
+    /** 将浮点颜色转换为整数颜色，绘制全屏背景。 */
     public static void renderScreenTriangle(Vec3 color) {
         renderScreenTriangle(
             (int) (color.x * 255),
@@ -53,9 +55,7 @@ public class MyRenderHelper {
     }
     
     
-    /**
-     * {@link RenderTarget#blitToScreen(int, int)}
-     */
+    /** 使用指定颜色绘制全屏背景，并清理着色器状态。 */
     @VanillaRuntimeHooks
     public static void renderScreenTriangle(int r, int g, int b, int a) {
         ShaderInstance shader = GameRenderer.getPositionColorShader();
@@ -86,21 +86,18 @@ public class MyRenderHelper {
         shader.clear();
     }
     
-    /**
-     * {@link RenderTarget#blitToScreen(int, int)}
-     */
+    /** 沿用原版渲染目标输出到屏幕的处理方式。 */
 
 
     
     
-    /**
-     * {@link RenderTarget#blitToScreen(int, int)}
-     */
+    /** 沿用原版渲染目标输出到屏幕的处理方式。 */
     
-    // it will remove the light sections that are marked to be removed
-    // if not, light data will cause minor memory leak
-    // and wrongly remove the light data when the chunks get reloaded to client
-    // this should not run before world rendering or the smooth lighting may become abnormal in section edge
+    // 清除已标记移除的光照区段，
+    // 避免光照数据残留造成内存泄漏，
+    // 也避免区块重新加载后误删其光照数据。
+    // 必须在世界渲染后执行，以免区段边界的平滑光照异常。
+    /** 多世界初始化后运行非真实当前维度的光照引擎更新。 */
     public static void lateUpdateLight() {
         if (!ClientWorldLoader.getIsInitialized()) {
             return;
@@ -113,11 +110,7 @@ public class MyRenderHelper {
         });
     }
     
-    /**
-     * If we don't do this
-     * the future created in {@link SectionRenderDispatcher#uploadSectionLayer}
-     * may never complete
-     */
+    /** 提前上传远程世界待处理的网格，减少首张照片缺少地形。 */
     public static void earlyRemoteUpload() {
         if (!ClientWorldLoader.getIsInitialized()) {
             return;
@@ -130,6 +123,7 @@ public class MyRenderHelper {
         });
     }
     
+    /** 恢复背面剔除模式。 */
     public static void recoverFaceCulling() {
         glCullFace(GL_BACK);
     }

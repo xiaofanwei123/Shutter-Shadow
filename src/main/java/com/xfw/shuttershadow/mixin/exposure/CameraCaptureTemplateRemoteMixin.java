@@ -27,10 +27,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** 手动照片使用远景；红石照片保留 Exposure 原生源维度截图和后处理。 */
+/** 按拍摄参数选择手动目标维度截图或红石源维度截图。 */
 @Mixin(value = CameraCaptureTemplate.class, remap = false)
 public abstract class CameraCaptureTemplateRemoteMixin {
-    /** 玩家跨维度后仍从原支架所在的 IP 世界查询实体，复用 Exposure 后续全部管线。 */
+    /** 包裹 createTask 的 ClientLevel.getEntity：源照片事务校验当前支架仍有效。 */
     @WrapOperation(method = "createTask", at = @At(value = "INVOKE", target =
             "Lnet/minecraft/client/multiplayer/ClientLevel;getEntity(I)Lnet/minecraft/world/entity/Entity;",
             remap = true))
@@ -48,6 +48,7 @@ public abstract class CameraCaptureTemplateRemoteMixin {
                 ResourceKey.create(Registries.DIMENSION, scene.sourceDimension()));
         return source == null ? null : source.getEntity(id);
     }
+    /** 根据拍摄参数创建红石源世界截图或手动远景截图任务。 */
     @WrapOperation(method = "createTask", at = @At(value = "INVOKE", ordinal = 0, target =
             "Lio/github/mortuusars/exposure/client/capture/Capture;of(Lio/github/mortuusars/exposure/util/cycles/task/Task;[Lio/github/mortuusars/exposure/client/capture/action/CaptureAction;)Lio/github/mortuusars/exposure/client/capture/Capture;"))
     private Capture<Image> shuttershadow$remoteStandShot(Task<Result<Image>> screenshot,
@@ -64,7 +65,7 @@ public abstract class CameraCaptureTemplateRemoteMixin {
         return new RemoteStandCapture(scene, (CameraStandEntity) cameraHolder, actions);
     }
 
-    /** 原生空任务没有失败回调，显式结束尚未创建截图对象的红石事务。 */
+    /** 原生截图任务为空时结束红石拍摄事务并报告失败。 */
     @Inject(method = "createTask", at = @At("RETURN"))
     private void shuttershadow$rejectEmptySourceCapture(CaptureParameters parameters,
                                                         CallbackInfoReturnable<Task<?>> callback) {

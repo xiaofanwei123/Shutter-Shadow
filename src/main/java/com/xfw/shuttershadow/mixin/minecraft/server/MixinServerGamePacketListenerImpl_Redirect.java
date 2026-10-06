@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.server.MinecraftServer;
@@ -13,10 +13,12 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import com.xfw.shuttershadow.network.PacketRedirection;
 import com.xfw.shuttershadow.core.teleportation.ServerTeleportationManager;
 
+/** 在指定维度作用域中包装服务器消息，其余发送沿用原版。 */
 @Mixin(ServerCommonPacketListenerImpl.class)
 public class MixinServerGamePacketListenerImpl_Redirect {
     @Shadow @Final protected MinecraftServer server;
     
+    /** 修改 send 开头 packet：没有强制维度直接返回原包。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     @ModifyVariable(
         method = "send(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketSendListener;)V",

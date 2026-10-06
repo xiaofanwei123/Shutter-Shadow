@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.compat;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.caffeinemc.mods.sodium.client.render.chunk.lists.SortedRenderLists;
 import net.caffeinemc.mods.sodium.client.render.chunk.lists.SectionCollector;
@@ -11,6 +11,7 @@ import java.util.ArrayDeque;
 import java.util.EnumMap;
 import java.util.Map;
 
+/** 保存一次相机渲染使用的 Sodium 视距、可见区段和任务队列。 */
 public class SodiumRenderingContext {
     public RenderSectionManager owner;
     public SortedRenderLists renderLists;
@@ -20,6 +21,7 @@ public class SodiumRenderingContext {
     
     public int renderDistance;
     
+    /** 保存视距、初始化空SortedRenderLists，并为每种任务类型创建独立ArrayDeque。 */
     public SodiumRenderingContext(int renderDistance) {
         this.renderDistance = renderDistance;
         this.renderLists = SortedRenderLists.empty();

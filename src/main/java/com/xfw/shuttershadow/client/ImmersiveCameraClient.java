@@ -45,14 +45,7 @@ import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Exposure 的客户端适配层。
- * <p>
- * 职责：把 Exposure 的取景器/截图流程桥接到本模组内核的远程世界渲染能力。
- * 远程维度、网格、实体由内核统一托管；此类只管理会话与渲染调用。
- * <p>
- * 生命周期：由 ClientTickEvent.Post 驱动，基于“滤镜映射”自动开启/关闭会话。
- */
+/** 客户端远维度相机入口。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID, value = Dist.CLIENT)
 public final class ImmersiveCameraClient {
 
@@ -71,56 +64,41 @@ public final class ImmersiveCameraClient {
 
     /** 渲染防重入标志：IP 的渲染会回调进本类，必须避免递归。 */
     private static boolean rendering;
-    /** Suppresses reopening the synthetic scene while a dimension-film transfer is pending. */
+    /** 维度胶卷传送期间阻止重新打开远维度场景。 */
     private static boolean suppressRemoteScene;
-    /** Defers camera-entity cleanup until IP has finished changing ClientLevel. */
+    /** 将相机实体清理推迟到客户端世界切换完成后。 */
     private static int deferredCameraResetTicks;
 
 
-    /**
-     * 会话快照。绑定连接和源世界，一旦玩家断线或跨维度就立即失效。
-     *
-     * @param sequence     本次会话的序号（与网络包对齐）
-     * @param viewfinder   触发会话的取景器实例（引用比较，用于检测更换）
-     * @param mapping      当前滤镜对应的维度/缩放映射
-     * @param connection   建立会话时的连接，用于检测重连
-     * @param sourceLevel  建立会话时玩家所在的源世界
-     */
+    /** 一个客户端会话：序号、取景器、路由、支架ID、连接和真实来源ClientLevel。 */
     private record Session(long sequence, Viewfinder viewfinder, DimensionFilters.Route mapping,
                            int cameraStandId, ClientPacketListener connection, ClientLevel sourceLevel) {
-        /** 会话是否仍然有效：玩家存在、连接未换、源世界未换。 */
+        /** 预览要求玩家、同连接及玩家真实level仍为来源level。 */
         boolean valid() {
             Minecraft mc = Minecraft.getInstance();
             return mc.player != null && connection == mc.getConnection() && mc.player.level() == sourceLevel;
         }
 
-        /** 一次性支架截图期间，真实玩家可以已被维度胶卷传送。 */
+        /** 后台截图只要求玩家、同连接和来源level存在，避免短暂Minecraft世界作用域切换使截图误判失效。 */
         boolean validForCapture() {
             Minecraft mc = Minecraft.getInstance();
             return mc.player != null && connection == mc.getConnection() && sourceLevel != null;
         }
     }
 
-    /**
-     * 单帧渲染所需的不可变数据。
-     *
-     * @param session       当前会话
-     * @param scene         服务端下发的远程场景信息
-     * @param cameraYOffset 相机物品带来的 Y 偏移（比如举镜高度）
-     */
+    /** 固定会话、场景和相机Y偏移的单帧快照。 */
     private record CaptureSnapshot(Session session, RemoteSceneStartS2C scene, double cameraYOffset) {
-        /** 相机和玩家投影共用坐标换算；X/Z 按倍率缩放，Y 只叠加偏移。 */
+        /** 将来源位置减源原点，再按场景比例映射到目标原点并应用Y偏移。 */
         Vec3 targetPosition(Vec3 sourcePosition, double yOffset) {
             return DimensionFilters.mapRelative(sourcePosition.subtract(scene.sourceOrigin()),
                     scene.position(), scene.coordinateScale(), yOffset);
         }
     }
 
+    /** 禁止实例化此工具类。 */
     private ImmersiveCameraClient() {}
 
-    /**
-     * 收到服务端场景数据。仅在序号匹配当前会话时接受，避免过期响应。
-     */
+    /** 只接受有效当前Session且序号、目标、来源维度完全一致的场景包，过期包直接丢弃。 */
     public static void start(RemoteSceneStartS2C message) {
         // 无会话、会话已失效、或序号不匹配 → 丢弃
         if (session == null || !session.valid() || session.sequence() != message.sequence()
@@ -129,7 +107,7 @@ public final class ImmersiveCameraClient {
         scene = message;
     }
 
-    /** 服务端在 IP 传送包之后发送；独立的离屏截图不依赖取景器会话。 */
+    /** 负序号取消指定远场/源场后台照片。 */
     public static void stopRemoteScene(RemoteSceneStopS2C message) {
         if (message.captureSequence() < 0) {
             RemoteStandCapture.cancel(message.captureSequence());
@@ -139,6 +117,7 @@ public final class ImmersiveCameraClient {
         }
     }
 
+    /** 清会话与场景，暂时抑制重新开远场并延后支架视角复位至少2tick。 */
     public static void stopRemoteScene() {
         session = null;
         scene = null;
@@ -147,17 +126,12 @@ public final class ImmersiveCameraClient {
         deferredCameraResetTicks = Math.max(deferredCameraResetTicks, 2);
     }
 
-    /** Called by the Exposure stop-control packet mixin instead of mutating the camera mid-frame. */
+    /** 把Exposure支架相机恢复推迟至少1tick，等真实维度包处理完成。 */
     public static void deferExposureStandCameraReset() {
         deferredCameraResetTicks = Math.max(deferredCameraResetTicks, 1);
     }
 
-    /**
-     * 采集本帧渲染所需的快照。
-     * <p>
-     * 返回 null 表示“当前不应渲染远程场景”，调用方直接跳过即可。
-     * 这是所有渲染/粒子路径的统一准入检查。
-     */
+    /** 源场截图期间返回null。 */
     private static CaptureSnapshot captureSnapshot() {
         if (SourceStandCapture.isRenderingSourceScene()) return null;
         // 支架截图状态只存在于一次同步离屏绘制内。
@@ -174,7 +148,7 @@ public final class ImmersiveCameraClient {
         return new CaptureSnapshot(session, scene, offset);
     }
 
-    /** 手动支架照片绑定 Exposure 截图任务中的真实支架。 */
+    /** 为手动支架后台截图建立无viewfinder的临时Session、场景及Y偏移，保存支架锚点。 */
     static void beginScreenshot(RemoteSceneStartS2C scene, CameraStandEntity stand) {
         Minecraft mc = Minecraft.getInstance();
         ItemStack camera = stand.getCamera();
@@ -184,6 +158,7 @@ public final class ImmersiveCameraClient {
         screenshotStand = stand;
     }
 
+    /** 只清除序号匹配的临时目标截图。 */
     static void endScreenshot(long sequence) {
         if (screenshot != null && screenshot.scene().sequence() == sequence) {
             screenshot = null;
@@ -191,16 +166,12 @@ public final class ImmersiveCameraClient {
         }
     }
 
-    /** 只在同步离屏截图调用内有效，用于限定 Exposure 底层渲染适配的范围。 */
+    /** 返回是否存在手动支架截图快照。 */
     public static boolean isStandScreenshot() {
         return screenshot != null;
     }
 
-    /**
-     * 关闭会话：通知服务端并清理本地状态。
-     * <p>
-     * 世界的销毁由内核连接生命周期管理，关闭取景器不销毁共享的远程世界。
-     */
+    /** 同连接时发送当前预览关闭包，然后清Session、scene和重试计数。 */
     private static void close() {
         // 仅当连接未变时才发包；断线/重连时连接已失效，发了也是错的
         if (session != null && session.connection() == Minecraft.getInstance().getConnection()) {
@@ -209,21 +180,16 @@ public final class ImmersiveCameraClient {
         session = null;
         scene = null;
         requestRetryTicks = 0;
-        // Remote worlds may still be used by a pending screenshot or transfer.
+        // 待完成的截图或传送仍可能使用远维度世界。
     }
 
-    /**
-     * 计算远程相机位置。
-     * <p>
-     * 映射规则：以源世界原点为基准，X/Z 按 coordinateScale 缩放，Y 不缩放（仅加相机偏移）。
-     * 这与原版维度传送的坐标语义一致。
-     */
+    /** 把源锚点插值眼位映射到目标场景并应用相机Y偏移。 */
     private static Vec3 cameraPosition(CaptureSnapshot snapshot, float partialTick) {
         return snapshot.targetPosition(cameraAnchor(snapshot.session()).getEyePosition(partialTick),
                 snapshot.cameraYOffset());
     }
 
-    /** 预览与照片绘制相同的附近真实玩家，像素可见性由目标视锥和原生深度决定。 */
+    /** 只在匹配的目标支架渲染堆栈内枚举真实来源玩家，按服务端玩家半径筛选并插值，再生成目标投影位置/相机位置记录。 */
     static List<PlayerProjection> playerProjections(ClientLevel remote, Camera remoteCamera, float partialTick) {
         if (!rendering) return List.of();
         CaptureSnapshot snapshot = captureSnapshot();
@@ -232,8 +198,8 @@ public final class ImmersiveCameraClient {
         ClientLevel source = snapshot.session().sourceLevel();
         if (source == null) return List.of();
 
-        // The entity hook can run during world join or after IP has popped its
-        // render context. Never read the top entry from an empty IP stack.
+        // 实体钩子可能在进入世界或渲染上下文出栈后调用，
+        // 读取渲染栈顶前必须确认栈不为空。
         if (!WorldRenderInfo.isRendering()) return List.of();
         WorldRenderInfo renderInfo = WorldRenderInfo.getTopRenderInfo();
         if (renderInfo == null || renderInfo.world != remote
@@ -259,10 +225,11 @@ public final class ImmersiveCameraClient {
         return projections;
     }
 
+    /** 源玩家实体、目标level、投影脚底位置和目标相机位置的渲染记录。 */
     static record PlayerProjection(AbstractClientPlayer player, ClientLevel level, Vec3 position,
                                    Vec3 cameraPosition) {}
 
-    /** Returns the local camera anchor: the stand for a stand camera, otherwise the active camera entity. */
+    /** 后台截图用其支架。 */
     private static Entity cameraAnchor(Session session) {
         if (screenshot != null && screenshot.session() == session) return screenshotStand;
         Minecraft mc = Minecraft.getInstance();
@@ -273,25 +240,19 @@ public final class ImmersiveCameraClient {
         return mc.getCameraEntity() == null ? mc.player : mc.getCameraEntity();
     }
 
+    /** CameraOnStand返回支架ID，其余返回-1。 */
     private static int cameraStandId(Viewfinder viewfinder) {
         if (viewfinder == null || viewfinder.camera() == null) return -1;
         return viewfinder.camera() instanceof CameraOnStand onStand
                 ? onStand.getStand().getId() : -1;
     }
 
-    /** 取景器绘制与后台截图的区块等待共用同一视距上限。 */
+    /** 返回客户端图形视距与服务端相机上限的最小值，至少1区块。 */
     static int effectiveRenderDistance(int serverMaximum) {
         return Math.max(1, Math.min(Minecraft.getInstance().options.renderDistance().get(), serverMaximum));
     }
 
-    /**
-     * Render directly into the caller's target, including Exposure's background
-     * capture target. A HUD texture would miss that second capture path.
-     * <p>
-     * 渲染入口。由 Exposure 在取景器/截图流程中回调，而非事件总线。
-     *
-     * @return true 表示本帧已成功渲染远程场景；false 表示跳过（由调用方走原逻辑）
-     */
+    /** 拒绝嵌套远场。 */
     public static boolean render(DeltaTracker deltaTracker) {
         // 防重入，避免嵌套正在进行的远程世界渲染。
         if (rendering || WorldRenderInfo.isRendering()) return false;
@@ -320,8 +281,8 @@ public final class ImmersiveCameraClient {
             if (backgroundCapture) {
                 mc.getMainRenderTarget().bindWrite(false);
             }
-            // IP skips the vanilla world clear inside WorldRenderInfo. This is
-            // a complete view, so stale depth must not hide the new scene.
+            // 远维度绘制跳过原版清屏，本次绘制覆盖完整视野，
+            // 需清除旧深度，避免遮住新场景。
             // IP 在 WorldRenderInfo 路径下不清屏，这里手动清深度，避免旧深度遮挡新场景
             RenderSystem.depthMask(true);
             RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
@@ -339,12 +300,7 @@ public final class ImmersiveCameraClient {
         return true;
     }
 
-    /**
-     * 客户端每 tick 的状态机：检测会话有效性、自动开关会话、推进远程粒子。
-     * <p>
-     * 使用 Post 而非 Pre：Post 在 vanilla 的 use-item 包之后运行，而那个包才是真正
-     * 激活相机的。若在 Viewfinder.setup 中发包，会早于 use-item，顺序错误。
-     */
+    /** 无连接时关闭。 */
     @SubscribeEvent
     public static void onTick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
@@ -360,10 +316,10 @@ public final class ImmersiveCameraClient {
         } else {
             clearDetachedStandViewfinder();
         }
-        // A physical dimension film has taken ownership of the player transfer.
-        // Do not recreate the source-world remote session while IP is applying
-        // the position packet, and keep it disabled while the stand camera is
-        // still active in the target dimension.
+        // 维度胶卷已接管玩家传送。
+        // 应用位置数据包时不重建来源世界的远景会话，
+        // 目标维度中仍在控制支架期间
+        // 也保持该会话关闭。
         if (suppressRemoteScene) {
             if (!CameraClient.isActive()) suppressRemoteScene = false;
             tickRemoteParticles(mc);
@@ -386,8 +342,8 @@ public final class ImmersiveCameraClient {
             requestRetryTicks = 0;
         }
         if (session != null && scene == null && requestRetryTicks-- <= 0) {
-            // Post runs after the vanilla use-item packet activates the camera.
-            // Sending inside Viewfinder.setup would precede that packet.
+            // 后置事件在原版使用物品数据包激活相机后执行。
+            // 若在取景器初始化时发送请求，会早于相机激活数据包。
             // 附件同步可能比取景请求晚到，保持目标不变并等待服务端确认。
             PacketDistributor.sendToServer(new CameraSessionRequestC2S(
                     session.sequence(), session.mapping().filter(), session.mapping().dimension(),
@@ -397,7 +353,7 @@ public final class ImmersiveCameraClient {
         tickRemoteParticles(mc);
     }
 
-    /** 清理服务端已解除操控、跨维度或已脱离 Exposure 状态的支架视角。 */
+    /** 发现操作者仍关联其他世界支架时移除活动相机并重设玩家视角。 */
     private static void clearDetachedStandViewfinder() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
@@ -411,31 +367,26 @@ public final class ImmersiveCameraClient {
             return;
         }
 
-        // Minecraft.cameraEntity is the authoritative render source. It can
-        // outlive Exposure's active viewfinder during an IP dimension swap.
+        // 实际相机实体决定渲染来源，
+        // 在无缝切换世界期间可能比取景器保持得更久。
         if (mc.getCameraEntity() instanceof CameraStandEntity cameraStand) {
             boolean wrongLevel = cameraStand.level() != mc.player.level();
             boolean active = CameraClient.isActive();
             boolean sameViewfinder = viewfinder != null
                     && viewfinder.camera() instanceof CameraOnStand onStand
                     && onStand.getStand() == cameraStand;
-            // The server clears the stand operator as part of a redstone
-            // release. That field can briefly be out of sync while Exposure
-            // still owns the local viewfinder. Treating it as a stale camera
-            // here causes the exact one-frame HUD disappearance seen during
-            // close-range redstone shots.
+            // 红石释放快门时服务端会清除支架操作者，
+            // 该字段可能短暂不同步，
+            // 而本地仍在使用取景器。此时若判定相机失效，
+            // 会在近距离红石拍照时
+            // 导致界面短暂消失一帧。
             if (wrongLevel || !active || !sameViewfinder) {
                 CameraClient.resetCameraEntity();
             }
         }
     }
 
-    /**
-     * 推进远程维度的粒子。
-     * <p>
-     * IP 渲染远程世界时不会 tick 其粒子，需要手动在“切换世界上下文”中调用，
-     * 否则下界岩浆、末地传送门等粒子会静止。
-     */
+    /** 未暂停且有目标场景时临时切换目标世界与camera position，在已加载镜头区块每两tick animateTick，随后tick目标粒子。 */
     private static void tickRemoteParticles(Minecraft mc) {
         CaptureSnapshot snapshot = captureSnapshot();
         // 未处于远程渲染或游戏暂停 → 跳过
@@ -465,9 +416,7 @@ public final class ImmersiveCameraClient {
         });
     }
 
-    /**
-     * 从取景器上的相机物品解析滤镜映射。返回 null 表示“当前不是远程相机”。
-     */
+    /** 从当前viewfinder滤镜解析来源路由，目标等于玩家真实维度则无远场。 */
     private static DimensionFilters.Route mappingFor(Viewfinder viewfinder) {
         if (viewfinder == null || viewfinder.camera() == null) return null;
         // 读取相机上安装的滤镜物品
@@ -478,17 +427,15 @@ public final class ImmersiveCameraClient {
                 Minecraft.getInstance().player.level().dimension().location());
         if (entry != null && Minecraft.getInstance().player.level().dimension().location()
                 .equals(entry.dimension())) {
-            // Dimension filters are directional. Once the real player is in
-            // the declared level, normal Exposure rendering is the view.
+            // 维度滤镜按来源路由生效，玩家进入
+            // 滤镜目标维度后使用原生相机视图。
             return null;
         }
         return entry;
     }
 
 
-    /**
-     * 玩家登出时清理会话。close() 内部会检查连接一致性，登出时通常不会发包。
-     */
+    /** 登出取消全部后台照片并清预览、临时截图、抑制及延后复位状态。 */
     @SubscribeEvent
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         RemoteStandCapture.cancelAll();

@@ -12,9 +12,11 @@ import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
+/** 客户端重定向包处理作用域及独立远区块批次吞吐计算器。 */
 public class PacketRedirectionClient {
     private static ChunkBatchSizeCalculator remoteBatchCalculator = new ChunkBatchSizeCalculator();
 
+    /** 更换远区块批次计算器，清除上次连接历史。 */
     public static void resetChunkBatchCalculator() {
         remoteBatchCalculator = new ChunkBatchSizeCalculator();
     }
@@ -26,11 +28,12 @@ public class PacketRedirectionClient {
     public static final ThreadLocal<ResourceKey<Level>> clientTaskRedirection =
             ThreadLocal.withInitial(() -> null);
 
+    /** 判断当前线程是否在处理重定向包。 */
     public static boolean getIsProcessingRedirectedMessage() {
         return clientTaskRedirection.get() != null;
     }
 
-    /** 维度键直接来自数据包，不再依赖登录时建立的整数映射。 */
+    /** 非主线程则排入Minecraft线程。 */
     public static void handleRedirectedPacket(ResourceKey<Level> dimension,
             Packet<ClientGamePacketListener> packet, ClientGamePacketListener handler) {
         Minecraft minecraft = Minecraft.getInstance();

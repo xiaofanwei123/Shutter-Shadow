@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** 仅手动远景照片恢复临时截图深度附件，红石照片不切换远景管线。 */
+/** 手动远景截图切换目标时，恢复 Iris 的深度纹理附件。 */
 @Pseudo
 @Mixin(targets = "net.irisshaders.iris.targets.RenderTargets", remap = false)
 public abstract class IrisCameraDepthTargetMixin {
@@ -23,6 +23,7 @@ public abstract class IrisCameraDepthTargetMixin {
     @Unique private boolean shuttershadow$cameraDepthPending;
     @Unique private RenderTarget shuttershadow$cameraTarget;
 
+    /** 注入 resizeIfNeeded 开头。 */
     @Inject(method = "resizeIfNeeded", at = @At("HEAD"))
     private void shuttershadow$checkCameraDepth(int depthBufferVersion, int depthTexture,
                                                int width, int height, DepthBufferFormat depthFormat,
@@ -41,6 +42,7 @@ public abstract class IrisCameraDepthTargetMixin {
         cachedDepthBufferVersion = depthBufferVersion ^ 1;
     }
 
+    /** 注入 resizeIfNeeded 返回。 */
     @Inject(method = "resizeIfNeeded", at = @At("RETURN"))
     private void shuttershadow$finishCameraDepth(int depthBufferVersion, int depthTexture,
                                                 int width, int height, DepthBufferFormat depthFormat,

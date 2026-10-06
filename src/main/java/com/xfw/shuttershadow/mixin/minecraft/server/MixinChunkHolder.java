@@ -15,11 +15,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.List;
 
+/** 让区块更新广播同时正确送达本地玩家和异维度相机观察者。 */
 @Mixin(ChunkHolder.class)
 public class MixinChunkHolder {
     @Shadow @Final private LevelHeightAccessor levelHeightAccessor;
 
-    /** 仅混合了异维度观察者时分流；普通本维度广播完全走原版。 */
+    /** 广播列表包含远景观察者时，按区块所属维度发送更新。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     @Inject(method = "broadcast", at = @At("HEAD"), cancellable = true)
     private void shuttershadow$routeRemoteUpdates(List<ServerPlayer> players, Packet packet, CallbackInfo ci) {

@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.SectionBufferBuilderPool;
@@ -11,17 +11,10 @@ import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.compat.SodiumInterface;
 import com.xfw.shuttershadow.mixin.minecraft.client.MixinSectionBufferBuilderPack;
 
+/** 为后台世界的原版区段编译器分配独立缓冲池。 */
 @Mixin(SectionRenderDispatcher.class)
 public class MixinSectionRenderDispatcher {
-    /**
-     * When loading multiple client dimensions at the same time,
-     * there will be multiple {@link SectionRenderDispatcher} instances.
-     * They cannot share one {@link SectionBufferBuilderPool} instance because
-     * that type is not thread-safe.
-     * In {@link MixinSectionBufferBuilderPack} it reduces the initial size of the buffer
-     * to reduce memory overhead.
-     * This is not enabled in Sodium as Sodium does not use this.
-     */
+    /** 为远程世界创建独立编译缓冲池，避免跨线程共享。 */
     @Redirect(
         method = "<init>",
         at = @At(

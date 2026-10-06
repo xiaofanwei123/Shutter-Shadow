@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.Minecraft;
 import com.xfw.shuttershadow.core.CoreSettings;
@@ -8,16 +8,19 @@ import com.xfw.shuttershadow.util.Helper;
 
 import java.util.ArrayDeque;
 
-//@OnlyIn(Dist.CLIENT)
+// 仅供客户端使用。
 // 保留客户端相机视距自适应，不再上报没有服务端消费者的性能等级。
+/** 客户端每秒采样FPS及堆可用内存，滚动均值每5次采样更新性能档位。 */
 public class ClientPerformanceMonitor {
     
     public static PerformanceLevel level = PerformanceLevel.medium;
     
+    /** 一条FPS与可用堆MB采样。 */
     public static class Record {
         public final int FPS;
         public final int freeMemoryMB;
         
+        /** 保存样本数值。 */
         public Record(int FPS, int freeMemoryMB) {
             this.FPS = FPS;
             this.freeMemoryMB = freeMemoryMB;
@@ -31,6 +34,7 @@ public class ClientPerformanceMonitor {
     
     private static int counter = 0;
     
+    /** 游戏内记录FPS和最大堆减已使用堆的剩余MB，限制样本数并重算均值，每5样本调用updateLevel。 */
     public static void updateEverySecond(int newFps) {
         if (Minecraft.getInstance().player == null) {
             return;
@@ -60,6 +64,7 @@ public class ClientPerformanceMonitor {
         }
     }
     
+    /** 配置关闭自动调整时固定good，否则按PerformanceLevel阈值取档。 */
     private static void updateLevel() {
         if (Minecraft.getInstance().player == null) {
             return;

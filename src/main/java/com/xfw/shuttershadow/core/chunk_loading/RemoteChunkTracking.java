@@ -1,6 +1,6 @@
 package com.xfw.shuttershadow.core.chunk_loading;
 import com.xfw.shuttershadow.api.ChunkLoader;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.mojang.logging.LogUtils;
 import com.xfw.shuttershadow.event.ServerCleanupEvent;
@@ -28,6 +28,7 @@ import com.xfw.shuttershadow.network.PacketRedirection;
 import java.util.*;
 import java.util.function.Predicate;
 
+/** 额外区块订阅核心。 */
 public class RemoteChunkTracking {
 
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -35,6 +36,7 @@ public class RemoteChunkTracking {
     public static final int updateInterval = 13;
     public static final int defaultDelayUnloadGenerations = 4;
 
+    /** 注册每服务端tick更新与ServerCleanup清静态集合。 */
     public static void init() {
         NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class, event -> {
             RemoteChunkTracking.tick(event.getServer());
@@ -47,7 +49,8 @@ public class RemoteChunkTracking {
 
     }
 
-    // if the player object is recreated, pass in the old player object
+    // 玩家对象重建时，应传入旧玩家对象。
+    /** 遍历全部世界清掉旧ServerPlayer实例的实体观察者，然后强制移除其远区块记录。 */
     public static void removePlayerFromChunkTrackersAndEntityTrackers(ServerPlayer oldPlayer) {
         for (ServerLevel world : oldPlayer.server.getAllLevels()) {
             ServerChunkCache chunkManager = world.getChunkSource();
@@ -59,6 +62,7 @@ public class RemoteChunkTracking {
         forceRemovePlayer(oldPlayer);
     }
 
+    /** 单玩家/维度/区块观察记录：代数、距离、已发送、边界及valid。 */
     public static class PlayerWatchRecord {
         public final ServerPlayer player;
         public final ResourceKey<Level> dimension;
@@ -68,9 +72,10 @@ public class RemoteChunkTracking {
         public boolean isLoadedToPlayer;
         public boolean isValid = true;
         public boolean isBoundary = false;
-        // the light data is only sent on visibility boundary
-        // as the client can calculate light from block data
+        // 仅在可见范围边界发送光照数据。
+        // 范围内部的光照由客户端根据方块数据计算。
 
+        /** 保存所有观察参数，isValid保留字段默认值。 */
         public PlayerWatchRecord(
                 ServerPlayer player, ResourceKey<Level> dimension,
                 long chunkPos, int lastWatchGeneration,
@@ -86,6 +91,7 @@ public class RemoteChunkTracking {
             this.isBoundary = isBoundary;
         }
 
+        /** 生成带维度、区块坐标、距离、有效/发送状态的调试描述。 */
         @Override
         public String toString() {
             return String.format(
@@ -100,7 +106,7 @@ public class RemoteChunkTracking {
         }
     }
 
-    // Every chunk has a list of watching records
+    // 每个区块维护其观察者记录列表。
     private static final Map<
             ResourceKey<Level>,
             Long2ObjectOpenHashMap<
@@ -114,22 +120,24 @@ public class RemoteChunkTracking {
 
     private static int generationCounter = 0;
 
+    /** 懒创建维度→区块→玩家观察记录表。 */
     private static Long2ObjectOpenHashMap<Object2ObjectOpenHashMap<ServerPlayer, PlayerWatchRecord>>
     getDimChunkWatchRecords(ResourceKey<Level> dimension) {
         return chunkWatchRecords.computeIfAbsent(dimension, k -> new Long2ObjectOpenHashMap<>());
     }
 
-    /** 原维度由 Minecraft 原生发送，仅相机订阅的额外范围才由内核同步。 */
+    /** 只有玩家实际所在维度且原版ChunkTrackingView包含坐标才为原版观察。 */
     public static boolean isNativeChunkTracked(ServerPlayer player, ResourceKey<Level> dimension, int x, int z) {
         return player.level().dimension() == dimension && player.getChunkTrackingView().contains(x, z);
     }
 
-    /** 原版视野变化后立即接续相机额外范围的票据，避免移动时出现加载空档。 */
+    /** 原版视距变化时，仅已有额外loader的玩家立即重新计算远窗口。 */
     public static void onNativeViewChanged(ServerPlayer player) {
         PlayerChunkLoading info = playerInfoMap.get(player);
         if (info != null && !info.additionalChunkLoaders.isEmpty()) updateForPlayer(player);
     }
 
+    /** 按真实ServerPlayer身份建立PlayerChunkLoading，并检测其连接是否为内存连接。 */
     public static PlayerChunkLoading getPlayerInfo(ServerPlayer player) {
         return playerInfoMap.computeIfAbsent(
                 player,
@@ -140,6 +148,7 @@ public class RemoteChunkTracking {
         );
     }
 
+    /** 立即重新计算窗口、尝试发送已可发送区块、再刷新全服实体观察者。 */
     public static void immediatelyUpdateForPlayer(ServerPlayer player) {
         RemoteChunkTracking.updateForPlayer(player);
 
@@ -149,6 +158,7 @@ public class RemoteChunkTracking {
         EntitySync.update(player.server);
     }
 
+    /** 合并该玩家额外loader，登记可见维度与区块代数/距离/边界。 */
     public static void updateForPlayer(ServerPlayer player) {
         PlayerChunkLoading playerInfo = getPlayerInfo(player);
         playerInfo.visibleDimensions.clear();
@@ -197,7 +207,7 @@ public class RemoteChunkTracking {
                     } else {
                         int oldDistance = record.distanceToSource;
                         if (record.lastWatchGeneration == generationCounter) {
-                            // being updated again in the same turn
+                            // 同一轮中再次更新该记录。
                             if (distanceToSource < oldDistance) {
                                 record.distanceToSource = distanceToSource;
                                 playerInfo.markPendingLoading(record);
@@ -205,7 +215,7 @@ public class RemoteChunkTracking {
 
                             record.isBoundary = (record.isBoundary && isBoundary);
                         } else {
-                            // being updated at the first time in this turn
+                            // 本轮首次更新该记录。
                             playerInfo.loadedChunks++;
                             if (distanceToSource < oldDistance) {
                                 playerInfo.markPendingLoading(record);
@@ -223,11 +233,12 @@ public class RemoteChunkTracking {
         }
     }
 
+    /** 过期观察记录发送必要的带维度forget并触发unwatch。 */
     private static void purge(
             MinecraftServer server,
             Object2ObjectOpenHashMap<ResourceKey<Level>, LongOpenHashSet> additionalLoadedChunks
     ) {
-        // purge chunk watch records
+        // 清理失效的区块观察记录。
         chunkWatchRecords.forEach((dimension, chunkRecords) -> {
             chunkRecords.long2ObjectEntrySet().removeIf(entry -> {
                 long chunkPosLong = entry.getLongKey();
@@ -269,7 +280,7 @@ public class RemoteChunkTracking {
             });
         });
 
-        // purge player info map
+        // 清理失效的玩家加载信息。
         playerInfoMap.entrySet().removeIf(e -> e.getKey().isRemoved());
 
         for (ServerLevel world : server.getAllLevels()) {
@@ -300,7 +311,8 @@ public class RemoteChunkTracking {
         }
     }
 
-    // unload chunks earlier if the player loads many chunks
+    // 玩家加载区块较多时，提前释放不再观察的区块。
+    /** 加载区块越多越快卸载：>2000延1代、>1200延2代，其余默认。 */
     private static int getDelayUnloadGenerationForPlayer(ServerPlayer player) {
         PlayerChunkLoading playerInfo = getPlayerInfo(player);
         if (playerInfo == null) {
@@ -320,6 +332,7 @@ public class RemoteChunkTracking {
         return defaultDelayUnloadGenerations;
     }
 
+    /** 遍历全局loader标记需要的票据及保活集合，删除不存在维度的loader。 */
     private static Object2ObjectOpenHashMap<ResourceKey<Level>, LongOpenHashSet> refreshAdditionalChunkLoaders(MinecraftServer server) {
         Object2ObjectOpenHashMap<ResourceKey<Level>, LongOpenHashSet> additionalLoadedChunks =
                 new Object2ObjectOpenHashMap<>();
@@ -337,7 +350,8 @@ public class RemoteChunkTracking {
 
             LongOpenHashSet set = additionalLoadedChunks.computeIfAbsent(dimension, k -> new LongOpenHashSet());
 
-            chunkLoader.foreachChunkPos(new ChunkLoader.ChunkPosConsumer() {
+            chunkLoader.foreachChunkPos(new ChunkLoader.ChunkPosConsumer() /** 遍历全局loader区块的匿名ChunkPosConsumer。 */ {
+                /** 把区块标入该世界票据队列并加入本代全局保活集合。 */
                 @Override
                 public void consume(ResourceKey<Level> dimension, int x, int z, int distanceToSource) {
                     long chunkPos = ChunkPos.asLong(x, z);
@@ -352,6 +366,7 @@ public class RemoteChunkTracking {
         return additionalLoadedChunks;
     }
 
+    /** 按玩家ID分散周期刷新，定期刷新全局loader并purge。 */
     private static void tick(MinecraftServer server) {
         server.getProfiler().push("shuttershadow_camera_tracking");
 
@@ -361,7 +376,7 @@ public class RemoteChunkTracking {
             if (player.isRemoved()) continue;
             PlayerChunkLoading playerInfo = entry.getValue();
 
-            // spread the player updates to different ticks
+            // 将不同玩家的更新分散到不同游戏刻。
             if (playerInfo.shouldUpdateImmediately ||
                     ((player.getId() % updateInterval) == (gameTime % updateInterval))
             ) {
@@ -390,6 +405,7 @@ public class RemoteChunkTracking {
         EntitySync.update(server);
     }
 
+    /** 查指定玩家的区块记录，必须valid且已发送，最后应用额外谓词。 */
     public static boolean isPlayerWatchingChunk(
             ServerPlayer player,
             ResourceKey<Level> dimension,
@@ -417,6 +433,7 @@ public class RemoteChunkTracking {
         return predicate.test(record);
     }
 
+    /** 无额外条件查询valid且已发送的观察记录。 */
     public static boolean isPlayerWatchingChunk(
             ServerPlayer player,
             ResourceKey<Level> dimension,
@@ -425,6 +442,7 @@ public class RemoteChunkTracking {
         return isPlayerWatchingChunk(player, dimension, x, z, r -> true);
     }
 
+    /** 额外要求记录距离×16不超过给定方块半径。 */
     public static boolean isPlayerWatchingChunkWithinRadius(
             ServerPlayer player,
             ResourceKey<Level> dimension,
@@ -437,15 +455,14 @@ public class RemoteChunkTracking {
         );
     }
 
+    /** 清区块观察表、全局loader和玩家发送状态。 */
     private static void cleanup(MinecraftServer server) {
         chunkWatchRecords.clear();
         additionalChunkLoaders.clear();
         playerInfoMap.clear();
     }
 
-    /**
-     * Note when update should also check {@link com.xfw.shuttershadow.mixin.minecraft.server.MixinPlayerList}
-     */
+    /** 从某区块有效已发送记录取观察者，可选择只取窗口边界观察者。 */
     public static List<ServerPlayer> getPlayersViewingChunk(
             ResourceKey<Level> dimension,
             int x, int z,
@@ -458,8 +475,8 @@ public class RemoteChunkTracking {
             return Collections.emptyList();
         }
 
-        // the boundaryOnly parameter is only true when sending light update packets
-        // the client can calculate the light by the block data, but not accurate on loading boundary
+        // 仅发送光照更新包时启用只处理边界的筛选。
+        // 客户端可计算内部光照，但加载边界需要服务端提供准确数据。
 
         ArrayList<ServerPlayer> result = new ArrayList<>();
         for (RemoteChunkTracking.PlayerWatchRecord rec : recs.values()) {
@@ -471,7 +488,8 @@ public class RemoteChunkTracking {
         return result;
     }
 
-    // Note all PlayerWatchRecord taken from it are valid
+    // 此处取得的观察记录均有效。
+    /** 取得某维度区块的玩家记录表，无记录返回null。 */
     @Nullable
     public static Object2ObjectOpenHashMap<ServerPlayer, PlayerWatchRecord> getWatchRecordForChunk(
             ResourceKey<Level> dimension, int x, int z
@@ -480,6 +498,7 @@ public class RemoteChunkTracking {
         return records == null ? null : records.get(ChunkPos.asLong(x, z));
     }
 
+    /** 移除玩家发送状态和全部远观察记录。 */
     public static void forceRemovePlayer(ServerPlayer oldPlayer) {
         playerInfoMap.remove(oldPlayer);
 
@@ -501,6 +520,7 @@ public class RemoteChunkTracking {
         });
     }
 
+    /** 判断该维度是否还有额外观察区块记录。 */
     public static boolean shouldLoadDimension(ResourceKey<Level> dimension) {
         if (!chunkWatchRecords.containsKey(dimension)) {
             return false;
@@ -510,6 +530,7 @@ public class RemoteChunkTracking {
         return !map.isEmpty();
     }
 
+    /** 添加全局loader并立即标记其全部区块加载需求。 */
     public static void addGlobalAdditionalChunkLoader(
             MinecraftServer server,
             ChunkLoader chunkLoader
@@ -531,9 +552,7 @@ public class RemoteChunkTracking {
         });
     }
 
-    /**
-     * NOTE it removes chunk loader by object reference, not by value equality
-     */
+    /** 按对象身份移除全局loader。 */
     public static void removeGlobalAdditionalChunkLoader(
             MinecraftServer server, ChunkLoader chunkLoader
     ) {
@@ -542,6 +561,7 @@ public class RemoteChunkTracking {
 
 
 
+    /** 添加玩家额外loader并要求下tick立即刷新。 */
     public static void addPerPlayerAdditionalChunkLoader(
             ServerPlayer player, ChunkLoader chunkLoader
     ) {
@@ -550,9 +570,7 @@ public class RemoteChunkTracking {
         playerInfo.shouldUpdateImmediately = true;
     }
 
-    /**
-     * NOTE it removes chunk loader by object reference, not by value equality
-     */
+    /** 按身份删除玩家loader并要求立即刷新。 */
     public static void removePerPlayerAdditionalChunkLoader(
             ServerPlayer player, ChunkLoader chunkLoader
     ) {
@@ -562,6 +580,7 @@ public class RemoteChunkTracking {
         info.shouldUpdateImmediately = true;
     }
 
+    /** 返回玩家当前额外可见维度集合，无状态为空集合。 */
     public static Set<ResourceKey<Level>> getVisibleDimensions(ServerPlayer player) {
         PlayerChunkLoading info = playerInfoMap.get(player);
         return info == null ? Collections.emptySet() : info.visibleDimensions;

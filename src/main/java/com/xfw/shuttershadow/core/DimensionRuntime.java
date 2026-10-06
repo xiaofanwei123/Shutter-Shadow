@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.xfw.shuttershadow.network.CorePayloads;
 import net.neoforged.bus.api.IEventBus;
@@ -19,8 +19,10 @@ import com.xfw.shuttershadow.util.Helper;
 // Shuttershadow 第四轮修改：撤销空调试工具初始化，保留核心注册及生命周期顺序。
 // Shuttershadow 第五轮裁剪：仅注册基础门类型，撤销跨门交互与旧门动画。
 // Shuttershadow 第六轮：撤销物理门实体注册、形状、存储和碰撞初始化。
+/** 通用内核引导，在业务玩法之前建立协议、远区块、世界信息和服务端传送基础。 */
 public class DimensionRuntime {
     
+    /** 初始化网络、远程区块、传送、内存监测及任务生命周期。 */
     public static void init(IEventBus eventBus) {
         Helper.LOGGER.info("Shutter Shadow dimension runtime initializing");
 

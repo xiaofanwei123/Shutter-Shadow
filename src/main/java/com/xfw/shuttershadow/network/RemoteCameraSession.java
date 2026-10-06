@@ -34,11 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * A remote camera subscription. The real player stays in the source level;
- * Immersive Portals owns remote chunk loading, packet routing and entity
- * tracking. This class maps the camera position and owns its loader.
- */
+/** 维护远维度取景会话、区块订阅和临时截图加载器。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class RemoteCameraSession {
     private static final Map<UUID, RemoteCameraSession> ACTIVE = new HashMap<>();
@@ -47,12 +43,15 @@ public final class RemoteCameraSession {
     private static final long CAPTURE_TIMEOUT_TICKS = 3600L;
     private static long nextCaptureSequence;
 
+    /** 记录照片区块加载器的所有者、来源维度和登记时间。 */
     private record CaptureLoader(ServerPlayer owner, ChunkLoader loader, ResourceKey<Level> sourceDimension,
                                  long lastUsedAt) {
+        /** 移除该照片的玩家区块加载器。 */
         void release() {
             ChunkLoading.removeChunkLoaderForPlayer(owner, loader);
         }
 
+        /** 摄影师死亡、替换/离线，或来源/目标世界消失时标记不可用。 */
         boolean unavailable() {
             return owner.isRemoved() || !owner.isAlive()
                     || owner.getServer().getPlayerList().getPlayer(owner.getUUID()) != owner
@@ -60,10 +59,12 @@ public final class RemoteCameraSession {
                     || owner.getServer().getLevel(sourceDimension) == null;
         }
 
+        /** 不可用或主世界gameTime距离登记tick达到寿命时判过期。 */
         boolean expired(long lifetimeTicks) {
             return unavailable() || owner.getServer().overworld().getGameTime() - lastUsedAt >= lifetimeTicks;
         }
 
+        /** 只有过期才释放并返回true，供removeIf移除。 */
         boolean releaseIfExpired(long lifetimeTicks) {
             if (!expired(lifetimeTicks)) return false;
             release();
@@ -71,8 +72,8 @@ public final class RemoteCameraSession {
         }
     }
 
-    // IP removes loaders by identity. Retain the exact owner too, because
-    // respawning can replace ServerPlayer while retaining the same UUID.
+    // 加载器按对象身份移除，也要保留确切的所有者实例，
+    // 因为玩家重生后唯一标识不变，但服务端玩家实例已替换。
     private final ServerPlayer owner;
     private final long sequence;
     private final ResourceLocation filterId;
@@ -87,6 +88,7 @@ public final class RemoteCameraSession {
     private ChunkLoader sourceLoader;
     private int advertisedMaxRenderDistance = -1;
 
+    /** 保存摄影师、会话序号、路由、来源世界、目标世界、坐标映射与支架ID，loader在刷新时建立。 */
     private RemoteCameraSession(ServerPlayer player, CameraSessionRequestC2S request,
                                 ServerLevel target, double coordinateScale, Vec3 initial,
                                 Vec3 sourceOrigin, DimensionFilters.Route mapping) {
@@ -102,6 +104,7 @@ public final class RemoteCameraSession {
         this.mapping = mapping;
     }
 
+    /** 验证请求、实际活动相机、滤镜目标组件、支架控制者和路由。 */
     public static void handle(CameraSessionRequestC2S request, ServerPlayer player) {
         if (request == null || request.filterId() == null || request.targetDimension() == null || !player.isAlive()) return;
         DimensionFilters.Route mapping = mappingFor(player, request.filterId(),
@@ -110,7 +113,7 @@ public final class RemoteCameraSession {
         ResourceLocation targetId = mapping.dimension();
         if (targetId == null) return;
         ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, targetId);
-        // A missing source route means this filter has no remote scene here.
+        // 缺少来源路由时，此滤镜在当前维度不提供远景。
         if (key.equals(player.level().dimension())) return;
         ServerLevel target = player.getServer().getLevel(key);
         if (target == null) return;
@@ -137,7 +140,7 @@ public final class RemoteCameraSession {
         created.refreshRemoteWindow();
     }
 
-    /** Change the subscription only when the mapped camera crosses a chunk. */
+    /** 随镜头位置刷新远维度与来源玩家的区块订阅。 */
     private void refreshRemoteWindow() {
         Vec3 mapped = targetCameraPosition(owner);
         BlockPos pos = BlockPos.containing(mapped);
@@ -171,6 +174,7 @@ public final class RemoteCameraSession {
         }
     }
 
+    /** 发送当前目标/来源原点、比例、上限和来源维度的场景包并记已公布上限。 */
     private void sendScene(int maxRenderDistance) {
         PacketDistributor.sendToPlayer(owner, new RemoteSceneStartS2C(
                 sequence, remoteLevel.dimension().location(), targetOrigin,
@@ -179,20 +183,22 @@ public final class RemoteCameraSession {
         advertisedMaxRenderDistance = maxRenderDistance;
     }
 
+    /** 从手持或支架相机校验请求并解析滤镜路由。 */
     private static DimensionFilters.Route mappingFor(ServerPlayer player, ResourceLocation filterId,
                                                           ResourceLocation targetDimension, int cameraStandId) {
         if (cameraStandId >= 0) {
             CameraStandEntity stand = cameraStand(player, cameraStandId);
             return stand == null ? null : mappingForCamera(player, stand.getCamera(), filterId, targetDimension);
         }
-        // The client close packet is a convenience; the server camera state
-        // remains authoritative if it is delayed or never arrives.
+        // 客户端关闭通知仅用于及时清理，
+        // 延迟或未到达时仍以服务端相机状态为准。
         DimensionFilters.Route mainHand =
                 mappingForCamera(player, player.getMainHandItem(), filterId, targetDimension);
         return mainHand != null ? mainHand
                 : mappingForCamera(player, player.getOffhandItem(), filterId, targetDimension);
     }
 
+    /** 确认CameraItem处于活动状态、附件物品ID与客户端一致，重新解析来源路由并验证其组件目标与请求目标一致。 */
     private static DimensionFilters.Route mappingForCamera(ServerPlayer player,
                                                                 ItemStack camera,
                                                                 ResourceLocation filterId,
@@ -208,6 +214,7 @@ public final class RemoteCameraSession {
         return route != null && targetDimension.equals(route.dimension()) ? route : null;
     }
 
+    /** 确认当前世界对应实体是活动支架，并且Exposure当前执行玩家就是请求者。 */
     private static CameraStandEntity cameraStand(ServerPlayer player, int cameraStandId) {
         if (!(player.level().getEntity(cameraStandId) instanceof CameraStandEntity stand)) return null;
         if (!stand.isCameraActive()) return null;
@@ -215,32 +222,34 @@ public final class RemoteCameraSession {
         return executing != null && executing.getUUID().equals(player.getUUID()) ? stand : null;
     }
 
+    /** 返回支架位置或手持玩家位置作为来源锚点。 */
     private static Vec3 cameraAnchorPosition(ServerPlayer player, int cameraStandId) {
         CameraStandEntity stand = cameraStandId >= 0 ? cameraStand(player, cameraStandId) : null;
         return cameraStandId >= 0 ? (stand == null ? null : stand.position()) : player.position();
     }
 
-    /** 取景器、支架照片与真实区块订阅共用服务端上限，沿用现有场景包同步。 */
+    /** 返回服务器原版视距与相机配置上限的最小值，并至少为1。 */
     private static int serverMaxRenderDistance(ServerPlayer player) {
         return Math.max(1, Math.min(player.getServer().getPlayerList().getViewDistance(),
                 ShuttershadowConfig.maxRemoteViewDistance()));
     }
 
-    /** 截图订阅按独立序号管理，拍摄完成即解除，不保留闲置订阅。 */
+    /** 创建独立照片loader及场景，不替换正在看的预览会话。 */
     public static RemoteSceneStartS2C openCapture(ServerPlayer player, RemoteCaptureContext remote) {
         return createCapture(player, remote);
     }
 
-    /** 手动远景与红石源照片共用负事务编号，避免完成回执匹配到另一张照片。 */
+    /** 分配持续递减的负照片序号，与客户端正预览序号区分。 */
     static long allocateCaptureSequence() { return --nextCaptureSequence; }
 
-    /** 源维度订阅只覆盖可出镜玩家的范围，实体状态由 IP 原生追踪同步。 */
+    /** 按支架玩家半径向上换算区块半径，建立源维度玩家同步loader。 */
     private static ChunkLoader sourcePlayerLoader(ResourceKey<Level> dimension, Vec3 origin) {
         BlockPos block = BlockPos.containing(origin);
         int radius = (ShuttershadowConfig.standPlayerRadius() + 15) / 16;
         return new ChunkLoader(dimension, block.getX() >> 4, block.getZ() >> 4, radius);
     }
 
+    /** 照片沿用匹配预览窗口半径，否则取玩家请求半径，再钳制服务器上限。 */
     private static RemoteSceneStartS2C createCapture(ServerPlayer player, RemoteCaptureContext remote) {
         Vec3 position = remote.asHolderEntity().position();
         BlockPos block = BlockPos.containing(position);
@@ -263,7 +272,7 @@ public final class RemoteCameraSession {
                 remote.source().asHolderEntity().level().dimension().location(), List.of());
     }
 
-    /** 照片沿用当前已同步的出镜玩家，不等待取景器之外的合影区块。 */
+    /** 只保留摄影师本人或其源区块已在远同步/原版已发送状态的候选玩家，避免等待照片视角之外的区块。 */
     public static List<ServerPlayer> syncedCapturePlayers(long sequence, List<ServerPlayer> players) {
         CaptureLoader capture = CAPTURES.get(sequence);
         if (capture == null) return List.of();
@@ -279,11 +288,12 @@ public final class RemoteCameraSession {
         }).toList();
     }
 
-    /** 当前已加载区块的实体生成包排在 CaptureStart 前，不等待其它区块。 */
+    /** 立即刷新摄影师的远区块/实体跟踪，保证已有实体包排在截图请求前。 */
     public static void flushCapture(ServerPlayer player) {
         RemoteChunkTracking.immediatelyUpdateForPlayer(player);
     }
 
+    /** 按玩家身份与序号先关闭照片订阅，否则关闭匹配的预览会话。 */
     public static void close(ServerPlayer player, long sequence) {
         CaptureLoader capture = CAPTURES.get(sequence);
         if (capture != null && capture.owner() == player) {
@@ -295,6 +305,7 @@ public final class RemoteCameraSession {
         if (current != null && current.sequence == sequence) close(player);
     }
 
+    /** 只删除属于同一ServerPlayer实例的活动会话并释放loader。 */
     public static void close(ServerPlayer player) {
         RemoteCameraSession current = ACTIVE.get(player.getUUID());
         if (current != null && current.owner == player) {
@@ -303,24 +314,17 @@ public final class RemoteCameraSession {
         }
     }
 
-    /**
-     * Closes the server-side subscription before a physical dimension move.
-     *
-     * <p>The client stop packet is deliberately sent by
-     * {@link #finishDimensionTeleport(ServerPlayer)} after Immersive Portals
-     * has queued the dimension move. Sending it first makes Exposure restore
-     * its stand camera while the client is still in the source world, which
-     * produces the brief stand view and a second source-world reload.</p>
-     */
+    /** 真实维度移动前仅移除服务端预览订阅，不提前发客户端视角恢复包。 */
     public static void closeBeforeDimensionTeleport(ServerPlayer player) {
         close(player);
     }
 
-    /** Sends the client cleanup marker after the physical move was submitted. */
+    /** 真实移动包排入连接之后才发RemoteSceneStop，避免支架视角在旧世界短暂恢复。 */
     public static void finishDimensionTeleport(ServerPlayer player) {
         PacketDistributor.sendToPlayer(player, new RemoteSceneStopS2C());
     }
 
+    /** 移除目标与源玩家同步loader并置null。 */
     private void releaseLoader() {
         if (loader != null) {
             ChunkLoading.removeChunkLoaderForPlayer(owner, loader);
@@ -332,24 +336,34 @@ public final class RemoteCameraSession {
         }
     }
 
+    /** 查UUID并再次验证会话，失效返回null。 */
     public static RemoteCameraSession active(UUID playerId) {
         RemoteCameraSession session = ACTIVE.get(playerId);
         return session != null && session.isValid() ? session : null;
     }
+    /** 返回目标世界。 */
     public ServerLevel remoteLevel() { return remoteLevel; }
+    /** 返回当前滤镜物品ID。 */
     public ResourceLocation filterId() { return filterId; }
+    /** 比较完整路由记录，防止同物品ID的不同目标滤镜复用旧场景。 */
     public boolean matchesRoute(DimensionFilters.Route current) { return mapping.equals(current); }
+    /** 返回水平映射比例。 */
     public double coordinateScale() { return coordinateScale; }
+    /** 返回支架ID。 */
     public int cameraStandId() { return cameraStandId; }
+    /** 返回固定来源原点。 */
     public Vec3 sourceOrigin() { return sourceOrigin; }
+    /** 支架返回固定目标锚点，手持计算跟随玩家的目标位置。 */
     public Vec3 targetCameraPosition(ServerPlayer player) {
         return cameraStandId >= 0 ? targetOrigin : targetPosition(player);
     }
+    /** 把玩家相对源原点偏移映射到目标原点。 */
     public Vec3 targetPosition(ServerPlayer player) {
         Vec3 delta = player.position().subtract(sourceOrigin);
         return DimensionFilters.mapRelative(delta, targetOrigin, coordinateScale, 0.0D);
     }
 
+    /** 确认在线玩家实例、存活、来源世界不变、当前活动相机路由匹配且目标世界仍存在。 */
     private boolean isValid() {
         if (owner.getServer().getPlayerList().getPlayer(owner.getUUID()) != owner
                 || !owner.isAlive() || !owner.level().dimension().equals(sourceDimension)) return false;
@@ -358,6 +372,7 @@ public final class RemoteCameraSession {
                 && owner.getServer().getLevel(remoteLevel.dimension()) == remoteLevel;
     }
 
+    /** 清理无人拥有且超期的照片loader。 */
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         CAPTURES.entrySet().removeIf(entry -> !RemoteStandPreparation.ownsCapture(entry.getKey())
@@ -373,6 +388,7 @@ public final class RemoteCameraSession {
         }
     }
 
+    /** 登出时关闭该实例预览并释放该实例拥有的照片loader。 */
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
@@ -385,6 +401,7 @@ public final class RemoteCameraSession {
         }
     }
 
+    /** 服务端停止时释放所有loader并清空静态集合。 */
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         CAPTURES.values().forEach(CaptureLoader::release);

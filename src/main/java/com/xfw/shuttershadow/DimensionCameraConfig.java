@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 
-/** Resolves a filter's source-dimension route and coordinate conversion. */
+/** 维度路由解析及JSON兜底配置。 */
 public final class DimensionCameraConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final String FILE_NAME = "shuttershadow_dimensions.json";
@@ -36,14 +36,11 @@ public final class DimensionCameraConfig {
     private static final Map<RegistryAccess, List<Filter>> REGISTRY_CACHE =
             new WeakHashMap<>();
 
-    /**
-     * Item ID -> target dimension (the dimension-filter component) -> source
-     * dimension -> route.  The target dimension has to be part of the key now
-     * that all dimension filters share one item ID.
-     */
+    /** 按物品、目标维度组件和来源维度索引路由，区分共享物品编号的滤镜变体。 */
     private final Map<ResourceLocation, Map<ResourceLocation,
             Map<ResourceLocation, DimensionCameraPredicate.Route>>> filters;
 
+    /** 解析filters→物品ID→targets→目标维度→routes→来源维度，跳过非对象和非法ID，保存只读嵌套映射。 */
     private DimensionCameraConfig(JsonObject root) {
         Map<ResourceLocation, Map<ResourceLocation,
                 Map<ResourceLocation, DimensionCameraPredicate.Route>>> parsed = new LinkedHashMap<>();
@@ -74,7 +71,7 @@ public final class DimensionCameraConfig {
         filters = Collections.unmodifiableMap(parsed);
     }
 
-    /** Loads and caches the local route file, reloading it after an mtime change. */
+    /** 读取配置文件修改时间。 */
     public static DimensionCameraConfig load() {
         Path path = FMLPaths.CONFIGDIR.get().resolve(FILE_NAME);
         long stamp = modified(path);
@@ -103,7 +100,7 @@ public final class DimensionCameraConfig {
         }
     }
 
-    /** Resolves one source -> target edge from the local route table. */
+    /** 按滤镜物品、组件目标、当前来源维度取JSON路由，缺失任意一层返回null。 */
     private Route forFilter(ResourceLocation filter, ResourceLocation target, ResourceLocation source) {
         if (filter == null || target == null || source == null) return null;
         Map<ResourceLocation, Map<ResourceLocation, DimensionCameraPredicate.Route>> targetRoutes =
@@ -115,6 +112,7 @@ public final class DimensionCameraConfig {
         return route == null ? null : new Route(filter, route.targetDimension(), route.coordinateScale());
     }
 
+    /** 用ROUTE_CODEC解码每条来源路由，只收集成功解码的项，返回只读映射。 */
     private static Map<ResourceLocation, DimensionCameraPredicate.Route> parseRoutes(JsonObject routeValues) {
         Map<ResourceLocation, DimensionCameraPredicate.Route> routes = new LinkedHashMap<>();
         for (Map.Entry<String, JsonElement> routeEntry : routeValues.entrySet()) {
@@ -127,11 +125,7 @@ public final class DimensionCameraConfig {
         return Collections.unmodifiableMap(routes);
     }
 
-    /**
-     * Resolves the route from the Exposure data pack predicate. The local file
-     * is a small fallback for the period before the data-pack registry is
-     * ready (or when the stack has no matching predicate yet).
-     */
+    /** 查找第一个物品谓词命中的Exposure滤镜，从其维度谓词取来源路由。 */
     public static Route resolve(RegistryAccess registryAccess, ItemStack filterStack,
                                 ResourceLocation sourceDimension) {
         if (filterStack == null || filterStack.isEmpty() || sourceDimension == null) return null;
@@ -159,12 +153,12 @@ public final class DimensionCameraConfig {
                 }
             }
         } catch (RuntimeException ignored) {
-            // The local route table is the client-side fallback during early loading.
+            // 客户端早期加载时使用本地路由表作为兜底。
         }
         return load().forFilter(filterId, targetDimension, sourceDimension);
     }
 
-    /** Writes a route-only default configuration for the three vanilla levels. */
+    /** 构造三种原版目标维度的默认来源路由及coordinate_scale。 */
     private static JsonObject defaults() {
         JsonObject root = new JsonObject();
         JsonObject filters = new JsonObject();
@@ -185,6 +179,7 @@ public final class DimensionCameraConfig {
         return root;
     }
 
+    /** 把给定目标的来源路由打包进targets对象。 */
     private static void addTargetRoutes(JsonObject targets, String target, JsonObject... routes) {
         JsonObject value = new JsonObject();
         JsonObject routeMap = new JsonObject();
@@ -195,6 +190,7 @@ public final class DimensionCameraConfig {
         targets.add(target, value);
     }
 
+    /** 创建含source_dimension、target_dimension、coordinate_scale的JSON对象。 */
     private static JsonObject route(String source, String target, double coordinateScale) {
         JsonObject value = new JsonObject();
         value.addProperty("source_dimension", source);
@@ -203,11 +199,13 @@ public final class DimensionCameraConfig {
         return value;
     }
 
+    /** 安全取得JSON子对象，缺失或类型错误返回空对象。 */
     private static JsonObject object(JsonObject root, String key) {
         return root != null && root.has(key) && root.get(key).isJsonObject()
                 ? root.getAsJsonObject(key) : new JsonObject();
     }
 
+    /** 读取文件最后修改毫秒数。 */
     private static long modified(Path path) {
         try { return Files.exists(path) ? Files.getLastModifiedTime(path).toMillis() : -1L; }
         catch (IOException ignored) { return -1L; }

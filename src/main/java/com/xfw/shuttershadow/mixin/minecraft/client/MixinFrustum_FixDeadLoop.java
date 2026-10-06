@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.renderer.culling.Frustum;
 import org.joml.FrustumIntersection;
@@ -12,6 +12,7 @@ import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
 import com.xfw.shuttershadow.util.Helper;
 import com.xfw.shuttershadow.util.CountDownInt;
 
+/** 为原版视锥偏移循环增加上限，防止异常投影导致卡死。 */
 @Mixin(Frustum.class)
 public abstract class MixinFrustum_FixDeadLoop {
     @Shadow
@@ -30,11 +31,9 @@ public abstract class MixinFrustum_FixDeadLoop {
     private static final CountDownInt shuttershadow$logLimit = new CountDownInt(10);
     
     /**
-     * Make it to not deadloop when using isometric view.
-     * Also make it to not deadloop even if the projection matrix is broken. (In normal cases the projection should not be broken.)
-     *
+     * 最多修正十次相机包围盒，防止异常视锥造成死循环。
      * @author qouteall
-     * @reason Hard to do by injection or redirection
+     * @reason 此循环不易通过注入或重定向修正。
      */
     @Overwrite
     @VanillaRuntimeHooks
@@ -47,7 +46,7 @@ public abstract class MixinFrustum_FixDeadLoop {
         double maxY = Math.ceil(this.camY / (double) gridSize) * (double) gridSize;
         double maxZ = Math.ceil(this.camZ / (double) gridSize) * (double) gridSize;
         
-        int countLimit = 10; // limit the loop count
+        int countLimit = 10; // 限制循环次数。
         
         while (this.intersection.intersectAab((float) (minX - this.camX), (float) (minY - this.camY), (float) (minZ - this.camZ), (float) (maxX - this.camX), (float) (maxY - this.camY), (float) (maxZ - this.camZ))!= -2) {
             this.camX -= (double) (this.viewVector.x() * 4.0F);

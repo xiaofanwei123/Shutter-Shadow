@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.renderer.FogRenderer;
 import net.minecraft.world.phys.Vec3;
@@ -7,6 +7,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import com.xfw.shuttershadow.core.render.FogRendererContext;
 
+/** 保存和恢复各维度的雾颜色及渐变状态。 */
 @Mixin(value = FogRenderer.class, priority = 1100)
 public class MixinFogRenderer {
     @Shadow

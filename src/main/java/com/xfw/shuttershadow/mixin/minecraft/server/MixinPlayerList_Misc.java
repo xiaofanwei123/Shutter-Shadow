@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.network.Connection;
 import net.minecraft.server.level.ServerPlayer;
@@ -14,8 +14,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTracking;
 import com.xfw.shuttershadow.network.MiscNetworking;
 
+/** 服务端 PlayerList 的原玩家实例清理及维度数字 ID 初始化，作用于正常连接生命周期。 */
 @Mixin(PlayerList.class)
 public class MixinPlayerList_Misc {
+    /** respawn 开头从额外区块与实体追踪移除 oldPlayer，避免同 UUID 新实例接管后旧对象还拥有订阅。 */
     @Inject(
         method = "respawn",
         at = @At("HEAD")
@@ -27,6 +29,7 @@ public class MixinPlayerList_Misc {
         RemoteChunkTracking.removePlayerFromChunkTrackersAndEntityTrackers(oldPlayer);
     }
 
+    /** remove 开头清掉离线玩家所有相机区块/实体追踪，避免票据和观察者残留。 */
     @Inject(
         method = "remove",
         at = @At("HEAD")
@@ -35,6 +38,7 @@ public class MixinPlayerList_Misc {
         RemoteChunkTracking.removePlayerFromChunkTrackersAndEntityTrackers(player);
     }
 
+    /** 玩家登录时先同步维度编号，保证后续远景数据包能够解码。 */
     @Inject(
         method = "placeNewPlayer",
         at = @At(

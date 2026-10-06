@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.compat.sodium;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.caffeinemc.mods.sodium.client.render.chunk.RenderSectionManager;
 import net.caffeinemc.mods.sodium.client.render.chunk.lists.SortedRenderLists;
@@ -18,6 +18,7 @@ import com.xfw.shuttershadow.compat.SodiumRenderingContext;
 import java.util.ArrayDeque;
 import java.util.Map;
 
+/** 为 Sodium 区段管理器提供相机渲染上下文交换能力。 */
 @Mixin(value = RenderSectionManager.class, remap = false)
 // 相机视图独立保存列表、收集器及其任务队列；编译器和世界区段仍共用。
 public class MixinSodiumRenderSectionManager implements IESodiumRenderSectionManager {
@@ -33,6 +34,7 @@ public class MixinSodiumRenderSectionManager implements IESodiumRenderSectionMan
     @Shadow private SectionCollector lastSectionCollector;
     @Shadow private Map<TaskQueueType, ArrayDeque<RenderSection>> taskLists;
     
+    /** 校验并交换视距、可见区段、收集器及任务队列。 */
     @Override
     public void ip_swapContext(SodiumRenderingContext context) {
         Validate.isTrue(context.renderDistance != 0, "Render distance cannot be 0");

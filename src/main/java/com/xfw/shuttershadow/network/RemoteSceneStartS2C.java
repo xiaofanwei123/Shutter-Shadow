@@ -14,21 +14,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * 服务端 → 客户端：启动（或重定向）远程场景渲染。
- * <p>
- * 不改变玩家真实所在维度；远程世界的加载、网格与实体更新全部由 Immersive Portals 负责。
- * <p>
- * 设计要点：服务端只下发"基准位置 + 坐标缩放"，客户端在此基础上叠加玩家本地位移，
- * 从而无需每 tick 同步玩家坐标，远程视角即可实时跟随。
- *
- * @param sequence        会话序号，与客户端 {@code nextSequence} 对齐，防止过期包污染新会话
- * @param dimension       要渲染的远程维度 ID（例如 {@code minecraft:the_nether}）
- * @param position        远程相机在目标维度中的基准位置（已按缩放算好）
- * @param sourceOrigin    源世界原点基准，与玩家眼位相减得到本地位移
- * @param coordinateScale 水平坐标缩放系数（来自 {@code DimensionFilters.horizontalScale()}）
- * @param maxRenderDistance 服务端允许的远程最大渲染距离（单位与 IP 的 WorldRenderInfo 一致）
- */
+/** 目标场景快照：预览/照片序号、两个原点、比例、视距上限、来源维度和投影玩家UUID。 */
 public record RemoteSceneStartS2C(long sequence,
                                   ResourceLocation dimension,
                                   Vec3 position,
@@ -39,11 +25,12 @@ public record RemoteSceneStartS2C(long sequence,
                                   List<UUID> projectedPlayers)
         implements CustomPacketPayload {
 
+    /** 紧凑构造器复制玩家列表为只读快照。 */
     public RemoteSceneStartS2C {
         projectedPlayers = List.copyOf(projectedPlayers);
     }
 
-    /** Exposure 资格名单只供本次截图等待实体同步；模型显示另由目标视锥决定。 */
+    /** 保留其他字段，替换投影名单创建新记录。 */
     public RemoteSceneStartS2C withProjectedPlayers(List<UUID> players) {
         return new RemoteSceneStartS2C(sequence, dimension, position, sourceOrigin, coordinateScale,
                 maxRenderDistance, sourceDimension, players);
@@ -89,9 +76,7 @@ public record RemoteSceneStartS2C(long sequence,
     public static final StreamCodec<FriendlyByteBuf, RemoteSceneStartS2C> STREAM_CODEC = StreamCodec.of(
             RemoteSceneStartS2C::encode, RemoteSceneStartS2C::decode);
 
-    /**
-     * 序列化。对可能较小的整数使用变长编码以节省带宽。
-     */
+    /** 按固定顺序编码全部场景字段及UUID列表。 */
     private static void encode(FriendlyByteBuf buf, RemoteSceneStartS2C value) {
         buf.writeVarLong(value.sequence());           // 变长 long：sequence 通常较小，省字节
         buf.writeResourceLocation(value.dimension()); // 维度 ID
@@ -103,9 +88,7 @@ public record RemoteSceneStartS2C(long sequence,
         buf.writeCollection(value.projectedPlayers(), (buffer, player) -> buffer.writeUUID(player));
     }
 
-    /**
-     * 反序列化。字段顺序必须与 {@link #encode} 严格一致。
-     */
+    /** 按encode相同顺序解码全部字段。 */
     private static RemoteSceneStartS2C decode(FriendlyByteBuf buf) {
         return new RemoteSceneStartS2C(
                 buf.readVarLong(),
@@ -118,7 +101,7 @@ public record RemoteSceneStartS2C(long sequence,
                 buf.readList(buffer -> buffer.readUUID()));
     }
 
-    /** 返回包类型，供 NeoForge 网络层分发。 */
+    /** 返回remote_scene_start类型。 */
     @Override
     public Type<? extends CustomPacketPayload> type() {
         return TYPE;

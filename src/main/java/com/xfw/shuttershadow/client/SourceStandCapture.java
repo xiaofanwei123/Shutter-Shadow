@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-/** 红石照片复用 Exposure 原生截图；本类只限制源支架视角并回报完成。 */
+/** 红石支架源维度后台照片。 */
 public final class SourceStandCapture extends Capture<Image> {
     private static final Map<Long, SourceStandCapture> ACTIVE = new HashMap<>();
     private static ScopeAction renderingScope;
@@ -27,11 +27,13 @@ public final class SourceStandCapture extends Capture<Image> {
     private final ClientPacketListener connection = Minecraft.getInstance().getConnection();
     private final NativeScreenshot screenshot;
 
+    /** 把原截图Task包装NativeScreenshot，为支架创建ScopeAction，委托完整构造器。 */
     public SourceStandCapture(long sequence, CameraStandEntity stand, Task<Result<Image>> screenshot,
                               CaptureAction[] actions) {
         this(sequence, stand, new NativeScreenshot(screenshot), actions, new ScopeAction(stand));
     }
 
+    /** 给原actions末尾追加作用域action并登记ACTIVE。 */
     private SourceStandCapture(long sequence, CameraStandEntity stand, NativeScreenshot screenshot,
                                CaptureAction[] actions, ScopeAction scope) {
         super(screenshot, actionsWithScope(actions, scope));
@@ -48,13 +50,14 @@ public final class SourceStandCapture extends Capture<Image> {
         }));
     }
 
+    /** 复制原action数组追加ScopeAction，返回CompositeAction。 */
     private static CaptureAction actionsWithScope(CaptureAction[] actions, ScopeAction scope) {
         CaptureAction[] scoped = Arrays.copyOf(actions, actions.length + 1);
         scoped[actions.length] = scope;
         return new CompositeAction(scoped);
     }
 
-    /** 仅匹配原生截图临时切到的原支架镜头，不影响普通玩家画面或手动取景。 */
+    /** 当前scope存在且真实cameraEntity/level仍为源支架时标记源场渲染。 */
     public static boolean isRenderingSourceScene() {
         ScopeAction scope = renderingScope;
         if (scope == null) return false;
@@ -62,6 +65,7 @@ public final class SourceStandCapture extends Capture<Image> {
         return mc.getCameraEntity() == scope.stand && mc.level == scope.stand.level();
     }
 
+    /** 推进源维度拍摄，支架失效或玩家离开时取消任务。 */
     @Override
     public void tick() {
         if (isDone()) return;
@@ -74,12 +78,13 @@ public final class SourceStandCapture extends Capture<Image> {
         super.tick();
     }
 
+    /** 按序号找到对应任务并取消。 */
     public static void cancel(long sequence) {
         SourceStandCapture capture = ACTIVE.get(sequence);
         if (capture != null) capture.cancel();
     }
 
-    /** Exposure 尚未建立截图对象便拒绝参数时，服务端也必须收到失败结果。 */
+    /** 截图创建前失败时排主线程向同连接发送false回执。 */
     public static void failBeforeCapture(long sequence) {
         Minecraft mc = Minecraft.getInstance();
         ClientPacketListener connection = mc.getConnection();
@@ -91,12 +96,14 @@ public final class SourceStandCapture extends Capture<Image> {
         });
     }
 
+    /** 以快照取消所有ACTIVE并清renderingScope。 */
     static void cancelAll() {
         List.copyOf(ACTIVE.values()).forEach(SourceStandCapture::cancel);
         ACTIVE.clear();
         renderingScope = null;
     }
 
+    /** 暂停计时，已有截图future完成失败。 */
     private void cancel() {
         if (isDone()) return;
         timer.pause();
@@ -110,31 +117,39 @@ public final class SourceStandCapture extends Capture<Image> {
         }
     }
 
+    /** 源照片before/after作用域标记，供远场及源照片玩家隐藏Mixin判断。 */
     private static final class ScopeAction implements CaptureAction {
         private final CameraStandEntity stand;
 
+        /** 保存源支架引用。 */
         private ScopeAction(CameraStandEntity stand) { this.stand = stand; }
 
+        /** 截图前把本scope设为全局当前源场scope。 */
         @Override public void beforeCapture() { renderingScope = this; }
+        /** 截图后清scope。 */
         @Override public void afterCapture() { clear(); }
 
+        /** 仅当前仍为本scope时置null，避免误清嵌套/后续任务。 */
         private void clear() {
             if (renderingScope == this) renderingScope = null;
         }
     }
 
-    /** 不更改原生 direct/background 选择，只保存取消所需的原完成 future。 */
+    /** 保留原生Exposure截图Task并暴露其future供取消。 */
     private static final class NativeScreenshot extends Task<Result<Image>> {
         private final Task<Result<Image>> delegate;
         private CompletableFuture<Result<Image>> future;
 
+        /** 保存原截图delegate。 */
         private NativeScreenshot(Task<Result<Image>> delegate) { this.delegate = delegate; }
 
+        /** 执行原Task并保存/返回future。 */
         @Override public CompletableFuture<Result<Image>> execute() {
             future = delegate.execute();
             return future;
         }
 
+        /** 把tick转交原Task。 */
         @Override public void tick() { delegate.tick(); }
     }
 }

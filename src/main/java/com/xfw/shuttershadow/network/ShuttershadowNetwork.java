@@ -9,12 +9,14 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
 import java.util.Arrays;
 
-/** 相机取景、截图提交和胶卷传送的专用消息注册。 */
+/** 相机业务payload注册及客户端隔离调用。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class ShuttershadowNetwork {
     public static final String PROTOCOL_VERSION = "12";
+    /** 禁止实例化此工具类。 */
     private ShuttershadowNetwork() {}
 
+    /** 注册四个C2S与三个S2C相机业务包。 */
     @SubscribeEvent
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         var registrar = event.registrar(PROTOCOL_VERSION);
@@ -43,7 +45,7 @@ public final class ShuttershadowNetwork {
                         DimensionFilmCapture.setStandTeleportPreference(player, payload.accepted());
                     }
                 }));
-        // This body is resolved when invoked on the client, not on server registration.
+        // 仅客户端调用时解析方法体，服务端注册时不会加载客户端类型。
         registrar.playToClient(RemoteSceneStartS2C.TYPE, RemoteSceneStartS2C.STREAM_CODEC,
                 (payload, context) -> context.enqueueWork(() ->
                         dispatchOnClient("ImmersiveCameraClient", "start", payload)));
@@ -55,11 +57,7 @@ public final class ShuttershadowNetwork {
                         dispatchOnClient("DimensionFilmClient", "start", payload)));
     }
 
-    /**
-     * Keeps the common network registrar free of a hard client class reference.
-     * A dedicated server still registers the payload type, but can never load the
-     * client renderer when the client-only handler is absent.
-     */
+    /** 按客户端类名和真实参数类型反射调用静态处理器，专用服务端不加载客户端类型。 */
     private static void dispatchOnClient(String handlerClass, String method, Object... arguments) {
         try {
             Class<?> handler = Class.forName("com.xfw.shuttershadow.client." + handlerClass);
@@ -67,7 +65,7 @@ public final class ShuttershadowNetwork {
                     .map(Object::getClass).toArray(Class<?>[]::new);
             handler.getMethod(method, parameterTypes).invoke(null, arguments);
         } catch (ClassNotFoundException ignored) {
-            // The callback is never invoked on a dedicated server.
+            // 专用服务端不会调用此回调。
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Unable to invoke client handler " + handlerClass + "." + method,
                     exception);

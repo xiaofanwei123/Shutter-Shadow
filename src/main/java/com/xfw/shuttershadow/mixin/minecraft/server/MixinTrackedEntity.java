@@ -22,15 +22,19 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
 
+/** 补充相机实体观察者，管理异维度追踪、配对和同步。 */
 @Mixin(ChunkMap.TrackedEntity.class)
 public abstract class MixinTrackedEntity implements IETrackedEntity {
     @Shadow @Final private ServerEntity serverEntity;
     @Shadow @Final private Entity entity;
     @Shadow @Final private Set<ServerPlayerConnection> seenBy;
     @Unique private final Set<ServerPlayerConnection> shuttershadow$additionalWatchers = new HashSet<>();
+    /** Shadow 引用原 updatePlayer。 */
     @Shadow public abstract void updatePlayer(ServerPlayer player);
+    /** Shadow 引用原 getEffectiveRange，额外观察者仍使用实体类型的原有效追踪距离。 */
     @Shadow protected abstract int getEffectiveRange();
 
+    /** 按实体实际维度向本地及远景观察者发送更新包。 */
     @SuppressWarnings({"rawtypes", "unchecked"})
     @Redirect(method = "broadcast", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/server/network/ServerPlayerConnection;send(Lnet/minecraft/network/protocol/Packet;)V"))
@@ -38,7 +42,7 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
         PacketRedirection.sendRedirectedPacket(connection.getPlayer().connection, packet, entity.level().dimension());
     }
 
-    /** 本维度由原版管理；相机额外订阅只补齐原版视距之外的实体。 */
+    /** updatePlayer 开头：不同维度不执行原玩家距离删配对，已有 seenBy 转记额外观察者。 */
     @Inject(method = "updatePlayer", at = @At("HEAD"), cancellable = true)
     private void shuttershadow$keepRemoteWatcher(ServerPlayer player, CallbackInfo ci) {
         if (player.level().dimension() != entity.level().dimension()) {
@@ -59,7 +63,7 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
         }
     }
 
-    /** 原版继续判断本维度成员，异维度成员只跟随相机订阅。 */
+    /** 刷新补充实体追踪：清理无效额外观察者及必要的旧配对，向有效记录新增配对。 */
     @Override
     public void ip_updateEntityTrackingStatus() {
         var watchRecords = RemoteChunkTracking.getWatchRecordForChunk(
@@ -106,6 +110,7 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
         }
     }
 
+    /** 检查订阅、区块发送状态、追踪距离及实体可见资格。 */
     @Unique
     private boolean shuttershadow$watchesAdditionalEntity(RemoteChunkTracking.PlayerWatchRecord record,
             ServerPlayer player, int range) {
@@ -115,7 +120,7 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
                 && entity.broadcastToPlayer(player);
     }
 
-    /** 无缝切换复用 player，旧本地配对从此归额外订阅判断，避免残留跟踪。 */
+    /** 玩家换维后将旧配对转为相机订阅管理并重新检查可见性。 */
     @Override
     public void ip_onPlayerDimensionChange(ServerPlayer player) {
         if (seenBy.contains(player.connection)) {
@@ -123,6 +128,7 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
         }
     }
 
+    /** 解除保留玩家之外的全部实体配对，并清空追踪集合。 */
     @Override
     public void ip_stopTrackingExcept(ServerPlayer preservedPlayer) {
         for (ServerPlayerConnection connection : seenBy) {

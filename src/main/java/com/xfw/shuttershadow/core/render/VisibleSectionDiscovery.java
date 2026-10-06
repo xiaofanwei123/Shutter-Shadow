@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.render;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.xfw.shuttershadow.event.ClientCleanupEvent;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -22,12 +22,7 @@ import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 import java.util.ArrayDeque;
 import java.util.Stack;
 
-/**
- * Discover visible sections by breadth-first traverse, for remote camera rendering.
- * Probably faster than vanilla (because no cave culling and garbage object allocation).
- * No multi-threading because remote camera views are very dynamic which is not suitable for that.
- * No cave culling because vanilla has a multithreaded cave culling that's hard to integrate with remote views.
- */
+/** 同步收集相机远景中可见的原版渲染区段。 */
 @OnlyIn(Dist.CLIENT)
 public class VisibleSectionDiscovery {
     
@@ -39,7 +34,7 @@ public class VisibleSectionDiscovery {
     private static long timeMark;
     private static int viewDistance;
 
-    /** 远景、换维首帧和调试视图共用同一地形设置入口。 */
+    /** 扩展镜头附近的视锥范围，并收集可见渲染区段。 */
     public static void setupTerrain(ClientLevel world, RemoteViewArea storage, Camera camera,
                                     Frustum frustum, ObjectArrayList<RenderSection> sections,
                                     String profilerSection) {
@@ -52,6 +47,7 @@ public class VisibleSectionDiscovery {
         }
     }
     
+    /** 从镜头附近区段开始广度优先搜索，收集视距内的可见区段。 */
     public static void discoverVisibleSections(
         ClientLevel world,
         RemoteViewArea builtChunks_,
@@ -89,7 +85,7 @@ public class VisibleSectionDiscovery {
             );
         }
         
-        // breadth-first searching
+        // 广度优先搜索可见区段。
         while (!tempQueue.isEmpty()) {
             RenderSection curr = tempQueue.poll();
             int cx = SectionPos.blockToSectionCoord(curr.getOrigin().getX());
@@ -104,23 +100,26 @@ public class VisibleSectionDiscovery {
             checkSection(cx, cy, cz - 1, false);
         }
         
-        // avoid memory leak
+        // 清空临时引用，避免对象长期滞留。
         resultHolder = null;
         builtChunks = null;
         vanillaFrustum = null;
     }
     
+    /** 根据当前任务视距和性能档位计算有效渲染距离。 */
     private static void updateViewDistance() {
         int distance = WorldRenderInfo.getRenderDistance();
         viewDistance = PerformanceLevel.getCameraRenderDistance(ClientPerformanceMonitor.level, distance);
     }
     
-    // NOTE the vanilla frustum culling code may wrongly cull the first section
+    // 原版视锥剔除可能错误剔除搜索起始区段。
+    /** 根据区段包围盒判断是否位于视锥内。 */
     private static boolean isVisible(RenderSection builtChunk) {
         AABB box = builtChunk.getBoundingBox();
         return vanillaFrustum.isVisible(box);
     }
     
+    /** 镜头超出世界高度时，从最近的顶部或底部区段开始搜索。 */
     private static void discoverBottomOrTopLayerVisibleChunks(int cy) {
         int centerX = cameraSectionPos.x();
         int centerZ = cameraSectionPos.z();
@@ -142,6 +141,7 @@ public class VisibleSectionDiscovery {
         }
     }
     
+    /** 各轴距离超视距则返回。 */
     private static void checkSection(int cx, int cy, int cz, boolean skipFrustumTest) {
         if (Math.abs(cx - cameraSectionPos.x()) > viewDistance) {
             return;
@@ -158,7 +158,7 @@ public class VisibleSectionDiscovery {
         if (builtChunk != null) {
             IERenderSection ieRenderSection = (IERenderSection) builtChunk;
             if (ieRenderSection.portal_getMark() != timeMark) {
-                ieRenderSection.portal_setMark(timeMark);// mark it checked
+                ieRenderSection.portal_setMark(timeMark);// 标记此区段已检查。
                 if (skipFrustumTest || isVisible(builtChunk)) {
                     tempQueue.add(builtChunk);
                     resultHolder.add(builtChunk);
@@ -169,6 +169,7 @@ public class VisibleSectionDiscovery {
     
     private static final Stack<ObjectArrayList<RenderSection>> listCaches = new Stack<>();
     
+    /** 从缓存池取得或创建空的区段列表。 */
     public static ObjectArrayList<RenderSection> takeList() {
         if (listCaches.isEmpty()) {
             return new ObjectArrayList<>();
@@ -178,16 +179,19 @@ public class VisibleSectionDiscovery {
         }
     }
     
+    /** 清空使用过的列表并回池。 */
     public static void returnList(ObjectArrayList<RenderSection> list) {
-        list.clear();// avoid memory leak
+        list.clear();// 清空临时引用，避免对象长期滞留。
         listCaches.push(list);
     }
     
+    /** 注册客户端清理时释放列表缓存的回调。 */
     public static void init() {
         NeoForge.EVENT_BUS.addListener(ClientCleanupEvent.class, e -> VisibleSectionDiscovery.cleanUp());
 
     }
     
+    /** 清列表池与遍历临时对象引用。 */
     private static void cleanUp() {
         listCaches.clear();
         resultHolder = null;

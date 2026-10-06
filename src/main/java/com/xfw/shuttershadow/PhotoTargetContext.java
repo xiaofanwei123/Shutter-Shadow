@@ -8,23 +8,18 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
-/**
- * Records where the photographer stood when Exposure captured a remote scene.
- *
- * <p>RemoteCaptureContext makes Exposure's existing world probes use the
- * server's target dimension, so Exposure already writes the target position,
- * dimension, light, and biome to its own frame fields.</p>
- */
+/** Exposure照片ExtraData补写shuttershadow来源维度/位置/群系，区分远场照片和先传送再自拍。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class PhotoTargetContext {
     public static final ExtraData.Type<ResourceLocation> SOURCE_DIMENSION = ExtraData.Type.resourceLocation("shuttershadow_source_dimension");
     public static final ExtraData.Type<Vec3> SOURCE_POSITION = ExtraData.Type.vec3("shuttershadow_source_position");
     public static final ExtraData.Type<ResourceLocation> SOURCE_BIOME = ExtraData.Type.resourceLocation("shuttershadow_source_biome");
 
+    /** 禁止实例化此工具类。 */
     private PhotoTargetContext() {
     }
 
-    /** Exposure writes the target scene; only the source context is extra. */
+    /** 远场CameraHolder写真实源实体信息。 */
     @SubscribeEvent
     public static void apply(ModifyFrameExtraDataEvent event) {
         ExtraData data = event.getData();
@@ -36,13 +31,14 @@ public final class PhotoTargetContext {
             return;
         }
 
-        // A dimension-film selfie uses the real player after IP changes worlds,
-        // so the RemoteCaptureContext no longer exists at this point.
+        // 维度胶卷自拍在切换世界后使用真实玩家，
+        // 此时不再使用远维度拍摄上下文。
         DimensionFilmCapture.SourceSnapshot source =
                 DimensionFilmCapture.activeSource(event.getCameraHolder());
         if (source != null) write(data, source.dimension(), source.position(), source.biome());
     }
 
+    /** 写来源维度和位置，群系非null时追加群系键。 */
     private static void write(ExtraData data, ResourceLocation dimension,
                               Vec3 position, ResourceLocation biome) {
         data.put(SOURCE_DIMENSION, dimension);

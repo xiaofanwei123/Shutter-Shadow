@@ -19,9 +19,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.Optional;
 import java.util.Comparator;
 
-/** Supplies a bounded server-side photographer for unattended dimension stands. */
+/** 为无人操作的维度支架寻找在线拍摄执行者。 */
 @Mixin(value = CameraStandEntity.class, remap = false)
 public abstract class CameraStandPlayerFallbackMixin {
+    /** 注入 getPlayerExecutingExposure 返回。 */
     @Inject(method = "getPlayerExecutingExposure", at = @At("RETURN"), cancellable = true)
     private void shuttershadow$selectNearbyPlayer(CallbackInfoReturnable<Optional<Player>> callback) {
         CameraStandEntity stand = (CameraStandEntity) (Object) this;
@@ -38,9 +39,9 @@ public abstract class CameraStandPlayerFallbackMixin {
         if (callback.getReturnValue().orElse(null) instanceof ServerPlayer previous
                 && previous.isAlive() && previous.level() == stand.level()) return;
         ItemStack camera = stand.getCamera();
-        // Redstone calls CameraItem.release directly. At that point the stand
-        // camera is normally not active, so requiring isActive would make the
-        // fallback invisible exactly when the redstone shutter fires.
+        // 红石直接调用 CameraItem.release，此时支架相机通常尚未激活。
+        // 若要求 isActive，红石快门触发时将无法找到替代执行者。
+        // 因此这里不以取景器激活状态作为筛选条件。
         if (!(camera.getItem() instanceof CameraItem)) return;
         ItemStack filter = Attachment.FILTER.get(camera).getForReading();
         if (filter.isEmpty()) return;
@@ -60,10 +61,10 @@ public abstract class CameraStandPlayerFallbackMixin {
             return;
         }
 
-        // Exposure still needs a connected client to receive the photograph,
-        // even when nobody is part of the photographed frame. Use the nearest
-        // living player as the executor; this player is not added to the frame
-        // and is not teleported unless Exposure's own visibility check finds it.
+        // Exposure 仍需在线客户端接收照片，即使画面中没有玩家。
+        // 使用距离最近的存活玩家执行截图。
+        // 执行者不会因此自动加入照片的实体名单。
+        // 只有通过 Exposure 可见性检测时，执行者才会被传送。
         ServerPlayer executor = ((net.minecraft.server.level.ServerLevel) stand.level()).players().stream()
                 .filter(player -> player.isAlive()
                         && stand.distanceToSqr(player)

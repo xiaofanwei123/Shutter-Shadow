@@ -28,11 +28,7 @@ import java.util.Optional;
 import java.util.List;
 import java.util.Comparator;
 
-/**
- * A single shutter's authoritative world/pose for Exposure's existing probes.
- * The observation object is never spawned, tracked, saved or ticked. The real
- * player remains the author, operator and owner of the camera and its film.
- */
+/** 把真实来源CameraHolder包装为目标世界中的未注册Observation实体，供Exposure计算视角、照片元数据及目标实体。 */
 public final class RemoteCaptureContext implements CameraHolder {
     private final CameraHolder source;
     private final Entity observation;
@@ -43,12 +39,14 @@ public final class RemoteCaptureContext implements CameraHolder {
     private final int cameraStandId;
     private List<ServerPlayer> capturedPlayers;
 
+    /** 从有效预览会话取远世界、原点、比例和支架ID，委托完整构造器。 */
     private RemoteCaptureContext(CameraHolder source, RemoteCameraSession session,
                                  ServerPlayer player, Entity cameraEntity) {
         this(source, cameraEntity, session.remoteLevel(), session.coordinateScale(),
                 session.sourceOrigin(), session.targetCameraPosition(player), session.cameraStandId());
     }
 
+    /** 保存坐标映射与来源Holder，创建不加入世界实体列表的目标观察实体。 */
     private RemoteCaptureContext(CameraHolder source, Entity cameraEntity,
                                  ServerLevel remoteLevel, double coordinateScale,
                                  Vec3 sourceOrigin, Vec3 targetOrigin, int cameraStandId) {
@@ -61,7 +59,7 @@ public final class RemoteCaptureContext implements CameraHolder {
         this.observation = new Observation(remoteLevel, cameraEntity, targetOrigin);
     }
 
-    /** Returns null for ordinary cameras and unvalidated/expired sessions. */
+    /** 红石支架返回null以保持源维度照片。 */
     public static RemoteCaptureContext resolve(CameraHolder source, ItemStack camera) {
         // 红石照片只查询相机所在维度；目标上下文仅由传送入口单独取得。
         if (source.asHolderEntity() instanceof CameraStandEntity stand
@@ -70,11 +68,12 @@ public final class RemoteCaptureContext implements CameraHolder {
         return prepared != null ? prepared : resolveRoute(source, camera);
     }
 
-    /** 传送目标与照片世界独立，红石不再把目标维度用于照片或光照元数据。 */
+    /** 为纯传送读取路由，不受红石照片必须留在源维度的限制。 */
     public static RemoteCaptureContext resolveForTransfer(CameraHolder source, ItemStack camera) {
         return resolveRoute(source, camera);
     }
 
+    /** 确认当前摄影师身份和相机类型，验证当前滤镜路由与会话一致。 */
     private static RemoteCaptureContext resolveRoute(CameraHolder source, ItemStack camera) {
         ServerPlayer player = resolveExecutingPlayer(source);
         if (player == null) return null;
@@ -112,12 +111,16 @@ public final class RemoteCaptureContext implements CameraHolder {
                 sourceOrigin, targetOrigin, stand.getId());
     }
 
+    /** 返回真实来源CameraHolder。 */
     public CameraHolder source() { return source; }
+    /** 返回目标ServerLevel。 */
     public ServerLevel level() { return remoteLevel; }
+    /** 返回支架实体ID，手持为负值。 */
     public int cameraStandId() { return cameraStandId; }
+    /** 返回水平坐标映射比例。 */
     public double coordinateScale() { return coordinateScale; }
 
-    /** 同一组 Exposure 资格玩家用于照片实体信息和拍摄完成后的传送。 */
+    /** 有冻结名单时返回它。 */
     public List<ServerPlayer> playersInFrame(ItemStack camera) {
         if (capturedPlayers != null) return capturedPlayers;
         if (cameraStandId >= 0) return projectedPlayersInFrame(camera);
@@ -127,7 +130,7 @@ public final class RemoteCaptureContext implements CameraHolder {
                 .toList();
     }
 
-    /** 源范围限制真实玩家；远景资格按同一映射后的眼位、焦距与目标遮挡判断。 */
+    /** 按真实源世界玩家半径筛候选，把玩家投影进目标世界进行Exposure视锥/遮挡判定，再按目标镜头距离排序。 */
     private List<ServerPlayer> projectedPlayersInFrame(ItemStack camera) {
         if (!(camera.getItem() instanceof CameraItem item)) return List.of();
         ServerLevel sourceLevel = (ServerLevel) source.asHolderEntity().level();
@@ -142,25 +145,26 @@ public final class RemoteCaptureContext implements CameraHolder {
                 .toList();
     }
 
-    /** 加载就绪、开始曝光时固定名单，后续查询复用，不纳入后来走进镜头的人。 */
+    /** 复制并冻结此照片的出镜玩家名单，避免等待期间移动改变传送对象。 */
     public List<ServerPlayer> freezePlayersInFrame(List<ServerPlayer> players) {
         capturedPlayers = List.copyOf(players);
         return capturedPlayers;
     }
 
-    /** 复用 Exposure 的执行玩家查询；支架的操作玩家优先级由支架 Mixin 统一处理。 */
+    /** 把Holder的摄影师引用换为当前在线ServerPlayer，防止复活前旧对象被使用。 */
     private static ServerPlayer resolveExecutingPlayer(CameraHolder holder) {
         ServerPlayer executing = holder.getServerPlayerExecutingExposure().orElse(null);
         if (executing == null) return null;
         ServerPlayer current = executing.getServer().getPlayerList().getPlayer(executing.getUUID());
         return current != null ? current : executing;
     }
+    /** 玩家相对源原点的偏移映射到目标原点，Y偏移保持原值。 */
     public Vec3 targetPosition(ServerPlayer player) {
         Vec3 delta = player.position().subtract(sourceOrigin);
         return DimensionFilters.mapRelative(delta, targetOrigin, coordinateScale, 0.0D);
     }
 
-    /** 将目标脚下位置逆向映射回快门瞬间的源相机位置，Y 不缩放。 */
+    /** 目标位置相对目标原点的偏移按比例反算回真实源相机位置。 */
     public Vec3 sourcePosition(Vec3 targetPosition) {
         Vec3 delta = targetPosition.subtract(targetOrigin);
         // 手持相机可在打开后移动；当前 targetOrigin 对应当前源位置，而非打开时的 sourceOrigin。
@@ -168,40 +172,46 @@ public final class RemoteCaptureContext implements CameraHolder {
                 delta.x / coordinateScale, delta.y, delta.z / coordinateScale);
     }
 
-    /**
-     * Creates an unsaved, untracked target-level probe with the real player's
-     * current pose and dimensions. It exists only for capture visibility tests.
-     */
+    /** 创建目标世界中模拟该玩家尺寸、朝向和位置的Observation供遮挡判定。 */
     public Entity projectedPlayer(ServerPlayer player) {
         return new Observation(remoteLevel, player, targetPosition(player));
     }
 
+    /** 返回目标观察实体给Exposure当拍摄Holder。 */
     @Override
     public Entity asHolderEntity() { return observation; }
 
+    /** 保持真实来源照片作者。 */
     @Override
     public Entity getExposureAuthorEntity() { return source.getExposureAuthorEntity(); }
 
+    /** 转发来源玩家摄影师。 */
     @Override
     public Optional<Player> getPlayerExecutingExposure() { return source.getPlayerExecutingExposure(); }
 
+    /** 返回经过当前在线身份修正的服务端摄影师。 */
     @Override
     public Optional<ServerPlayer> getServerPlayerExecutingExposure() {
         return Optional.ofNullable(resolveExecutingPlayer(source));
     }
 
+    /** 转发来源奖励玩家。 */
     @Override
     public Optional<Player> getPlayerAwardedForExposure() { return source.getPlayerAwardedForExposure(); }
 
+    /** 转发来源服务端奖励玩家。 */
     @Override
     public Optional<ServerPlayer> getServerPlayerAwardedForExposure() { return source.getServerPlayerAwardedForExposure(); }
 
+    /** 转发来源相机操作者。 */
     @Override
     public Optional<CameraOperator> getExposureCameraOperator() { return source.getExposureCameraOperator(); }
 
+    /** 仅供拍摄计算的MARKER实体，不spawn。 */
     private static final class Observation extends Marker {
         private final EntityDimensions observerDimensions;
 
+        /** 在目标世界建立MARKER，保存带源眼高的尺寸并设置姿态、脚底位置和转角。 */
         private Observation(ServerLevel level, Entity source, Vec3 feet) {
             super(EntityType.MARKER, level);
             observerDimensions = source.getDimensions(source.getPose()).withEyeHeight(source.getEyeHeight());
@@ -212,11 +222,13 @@ public final class RemoteCaptureContext implements CameraHolder {
             setYRot(source.getYRot());
         }
 
+        /** 返回复制的观察者尺寸。 */
         @Override
         public EntityDimensions getDimensions(Pose pose) {
             return observerDimensions != null ? observerDimensions : super.getDimensions(pose);
         }
 
+        /** 只在眼睛所在区块已加载时检测水流体高度，未加载区块返回false，避免为水下标记加载远区块。 */
         @Override
         public boolean isUnderWater() {
             Vec3 eye = getEyePosition();

@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.xfw.shuttershadow.event.ServerCleanupEvent;
 import com.mojang.datafixers.DataFixer;
@@ -22,11 +22,13 @@ import com.xfw.shuttershadow.access.IEMinecraftServer;
 import java.lang.ref.WeakReference;
 import java.net.Proxy;
 
+/** 管理每台服务器的内核运行状态和关闭清理。 */
 @Mixin(MinecraftServer.class)
 public abstract class MixinMinecraftServer implements IEMinecraftServer {
     @Unique
     ServerRuntimeState ipPerServerInfo = new ServerRuntimeState();
 
+    /** 记录服务器弱引用，供内核访问而不阻碍退出后回收。 */
     @Inject(
         method = "<init>",
         at = @At("RETURN")
@@ -37,6 +39,7 @@ public abstract class MixinMinecraftServer implements IEMinecraftServer {
         MiscGlobals.refMinecraftServer = new WeakReference<>((MinecraftServer) ((Object) this));
     }
     
+    /** runServer 返回发 ServerCleanupEvent，清空加载、票据、传送管理等每服务器状态。 */
     @Inject(
         method = "Lnet/minecraft/server/MinecraftServer;runServer()V",
         at = @At("RETURN")
@@ -45,6 +48,7 @@ public abstract class MixinMinecraftServer implements IEMinecraftServer {
         NeoForge.EVENT_BUS.post(new ServerCleanupEvent((MinecraftServer) (Object) this));
     }
     
+    /** 返回当前服务器独立的内核运行状态。 */
     @Override
     public ServerRuntimeState ip_getPerServerInfo() {
         return ipPerServerInfo;

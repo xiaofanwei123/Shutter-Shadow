@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.chunk_loading;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.mojang.logging.LogUtils;
 import com.xfw.shuttershadow.event.ServerCleanupEvent;
@@ -32,24 +32,7 @@ import java.util.Comparator;
 import java.util.WeakHashMap;
 import java.util.concurrent.Executor;
 
-/**
- * Each {@link RemoteChunkTickets} manages ImmPtl chunk ticket for one dimension.
- * <p>
- * It re-implements player chunk loading throttling which is much simpler than vanilla's.
- * In vanilla, each chunk that get loaded by player has a chunk ticket.
- * The chunk tickets are not added immediately, but added by a throttled mechanism.
- * The throttling will reduce the world generation and chunk loading workload when the player moves fast,
- * and prioritize the chunks near player.
- * <p>
- * In vanilla, it uses {@link ChunkTaskPriorityQueue} that has 4 slots of "acquired" chunk positions.
- * If the acquired chunk slots are full, it will stop processing task, until a slot releases.
- * The {@link ChunkTaskPriorityQueueSorter} uses a {@link ProcessorMailbox}
- * (the mailbox is similar to a one-thread thread pool but uses threads from the worker thread pool)
- * to do a lot of message-passing (it enqueues at least 5 messages just to add one ticket).
- * In {@link DistanceManager.PlayerTicketTracker} it sends message for acquiring and releasing.
- * The chunk positions to release are passed into {@link DistanceManager#ticketsToRelease}.
- * A callback for sending message for releasing will be added to these chunk's future.
- */
+/** 每个ServerLevel的远区块票据和按距离加载节流队列。 */
 @SuppressWarnings("JavadocReference")
 public class RemoteChunkTickets {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -57,17 +40,20 @@ public class RemoteChunkTickets {
     public static final TicketType<ChunkPos> TICKET_TYPE =
         TicketType.create("shuttershadow", Comparator.comparingLong(ChunkPos::toLong));
     
-    // the fields of RemoteChunkTickets should avoid referencing ServerLevel
+    // 实例字段应避免持有服务端世界的强引用。
     public static final WeakHashMap<ServerLevel, RemoteChunkTickets> BY_DIMENSION = new WeakHashMap<>();
     
+    /** 注册ServerCleanupEvent清理。 */
     public static void init() {
         NeoForge.EVENT_BUS.addListener(ServerCleanupEvent.class, RemoteChunkTickets::cleanup);
     }
     
+    /** 区块最近登记代数及到相机源的距离。 */
     public static class ChunkTicketInfo {
         public int lastUpdateGeneration;
         public int distanceToSource;
         
+        /** 保存代数和距离。 */
         public ChunkTicketInfo(int lastUpdateGeneration, int distanceToSource) {
             this.lastUpdateGeneration = lastUpdateGeneration;
             this.distanceToSource = distanceToSource;
@@ -84,15 +70,18 @@ public class RemoteChunkTickets {
     
     public final int throttlingLimit = 4;
     
+    /** 私有构造器，由get按世界创建。 */
     private RemoteChunkTickets() {
     
     }
     
-    // it takes in world instead of dimension intId, to ensure dimension really exists
+    // 使用世界对象而非维度编号，确保目标维度确实存在。
+    /** 按ServerLevel取得/创建票据管理器。 */
     public static RemoteChunkTickets get(ServerLevel world) {
         return BY_DIMENSION.computeIfAbsent(world, k -> new RemoteChunkTickets());
     }
     
+    /** 登记区块当前代数与最短距离。 */
     public void markForLoading(long chunkPos, int distanceToSource, int generation) {
         Validate.isTrue(distanceToSource >= 0);
         
@@ -124,6 +113,7 @@ public class RemoteChunkTickets {
         }
     }
     
+    /** 懒创建指定距离的LongLinkedOpenHashSet队列。 */
     private LongLinkedOpenHashSet getQueueByDistance(int distanceToSource) {
         return Helper.arrayListComputeIfAbsent(
             chunksToAddTicketByDistance,
@@ -133,18 +123,7 @@ public class RemoteChunkTickets {
     }
     
     
-    /**
-     * This method is called during ticking and {@link DistanceManager#runAllUpdates(ChunkMap)} .
-     * <p>
-     * Only calling this method during ticking will make it throttled too slow.
-     * <p>
-     * This method uses the chunk holder's future, so it should be called after
-     * {@link DistanceManager#runAllUpdates(ChunkMap)}
-     * (as it calls {@link ChunkHolder#updateFutures(ChunkMap, Executor)}).
-     * Before updating the future, the chunk's entity ticking future may be a future that immediately returns {@link ChunkHolder.ChunkLoadingFailure} result.
-     * Each task to {@link net.minecraft.server.level.ServerChunkCache.MainThreadExecutor} will trigger
-     * {@link DistanceManager#runAllUpdates(ChunkMap)}.
-     */
+    /** 只在有效世界线程和运行中的服务器执行。 */
     public void flushThrottling(ServerLevel world) {
         if (Thread.currentThread() != ((IEWorld) world).portal_getThread()) {
             LOGGER.error("Called in a non-server-main (or server-world) thread.", new Throwable());
@@ -158,14 +137,14 @@ public class RemoteChunkTickets {
         }
         
         if (!world.getServer().isRunning()) {
-            // important: don't add chunk ticket when server is saving
-            // https://github.com/iPortalTeam/ImmersivePortalsMod/issues/1455
+            // 服务端正在退出保存时，禁止继续添加区块票据。
+            // 相关保存死锁记录：https://github.com/iPortalTeam/ImmersivePortalsMod/issues/1455
             return;
         }
         
         DistanceManager distanceManager = getDistanceManager(world);
         
-        // clear the already loaded chunks
+        // 清除已经完成加载的等待记录。
         waitingForLoading.removeIf((long chunkPos) -> {
             ChunkHolder chunkHolder = getChunkHolder(world, chunkPos);
             if (chunkHolder == null) {
@@ -189,7 +168,7 @@ public class RemoteChunkTickets {
             return true;
         });
         
-        // flush the pending-add-ticket queues
+        // 按距离顺序处理待添加票据队列。
         for (LongLinkedOpenHashSet queue : chunksToAddTicketByDistance) {
             if (queue != null) {
                 while (!queue.isEmpty()) {
@@ -211,6 +190,7 @@ public class RemoteChunkTickets {
         }
     }
     
+    /** 远区块加载开关开启时为区块添加相机TICKET_TYPE及加载等级。 */
     private static void addTicket(DistanceManager distanceManager, long chunkPos) {
         if (!CoreConfig.ENABLE_REMOTE_CHUNK_LOADING.get()) {
             return;
@@ -223,6 +203,7 @@ public class RemoteChunkTickets {
         
     }
     
+    /** 按调用者提供谓词移除不再需要的记录。 */
     public void purge(
         ServerLevel world,
         LongPredicate shouldKeepLoadingFunc
@@ -256,6 +237,7 @@ public class RemoteChunkTickets {
     }
     
     
+    /** activeLoading时票据半径等级为2，关闭时为1（票据等级参数，不是相机取景半径）。 */
     public static int getLoadingRadius() {
         if (CoreSettings.activeLoading) {
             return 2;
@@ -265,14 +247,17 @@ public class RemoteChunkTickets {
         }
     }
     
+    /** 通过IEChunkMap取已有ChunkHolder。 */
     public static ChunkHolder getChunkHolder(ServerLevel world, long chunkPos) {
         return ((IEChunkMap) (world.getChunkSource()).chunkMap).ip_getChunkHolder(chunkPos);
     }
     
+    /** 取得世界原版DistanceManager。 */
     public static DistanceManager getDistanceManager(ServerLevel world) {
         return world.getChunkSource().chunkMap.getDistanceManager();
     }
     
+    /** 把所有管理器标失效并清世界映射，避免停止后继续flush。 */
     private static void cleanup(ServerCleanupEvent event) {
         for (RemoteChunkTickets immPtlChunkTickets : BY_DIMENSION.values()) {
             immPtlChunkTickets.isValid = false;

@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.render;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.renderer.FogRenderer;
 import net.minecraft.resources.ResourceKey;
@@ -12,10 +12,7 @@ import com.xfw.shuttershadow.core.ClientWorldLoader;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/**
- * {@link FogRenderer}
- * {@link com.xfw.shuttershadow.mixin.minecraft.client.MixinFogRenderer}
- */
+/** FogRenderer静态颜色与群系雾插值数据的每维度上下文。 */
 @SuppressWarnings("SpellCheckingInspection")
 public class FogRendererContext {
     public float red;
@@ -31,8 +28,9 @@ public class FogRendererContext {
     
     public static StaticFieldsSwappingManager<FogRendererContext> swappingManager;
     
+    /** 触发FogRenderer类初始化，建立交换器并在登出清上下文表。 */
     public static void init() {
-        //load the class and apply mixin
+        // 触发类加载，使雾渲染混入生效。
         FogRenderer.class.hashCode();
         
         swappingManager = new StaticFieldsSwappingManager<>(
@@ -45,6 +43,7 @@ public class FogRendererContext {
         
     }
     
+    /** 指定本帧真实来源维度，并为当前缓存世界懒建立雾上下文。 */
     public static void update() {
         swappingManager.setOuterDimension(RenderStates.originalPlayerDimension);
         if (ClientWorldLoader.getIsInitialized()) {
@@ -61,6 +60,7 @@ public class FogRendererContext {
         }
     }
     
+    /** 玩家真实传送时切换外层雾上下文到目标维度。 */
     public static void onPlayerTeleport(ResourceKey<Level> from, ResourceKey<Level> to) {
         swappingManager.updateOuterDimensionAndChangeContext(to);
     }

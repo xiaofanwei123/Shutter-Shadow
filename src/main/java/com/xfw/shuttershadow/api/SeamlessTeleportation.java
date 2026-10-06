@@ -9,18 +9,12 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
-/** Server-thread entry points for Shuttershadow's immediate, seamless transfers. */
+/** 公开无缝传送API，返回确认移动成功的实体或null。 */
 public final class SeamlessTeleportation {
+    /** 禁止实例化此工具类。 */
     private SeamlessTeleportation() {}
 
-    /**
-     * Moves an entity to a feet position in a registered level on the same server.
-     * Returns {@code null} for an invalid or refused request. Ordinary entities
-     * are recreated across dimensions: callers must use the returned reference.
-     * This forced transfer does not fire NeoForge's cancellable dimension-travel
-     * event or wait for destination chunks. A player's vehicle follows that
-     * player; the vehicle's other passengers do not move with it.
-     */
+    /** 拒绝null参数、错线程/服务器、已移除/死亡实体、过期目标世界、非有限坐标或胶卷保护期非法调用。 */
     public static @Nullable Entity teleportEntity(Entity entity, ServerLevel targetLevel, Vec3 targetPosition) {
         if (entity == null || targetLevel == null || targetPosition == null) return null;
         MinecraftServer server = targetLevel.getServer();
@@ -29,7 +23,7 @@ public final class SeamlessTeleportation {
                 || server.getLevel(targetLevel.dimension()) != targetLevel
                 || !Double.isFinite(targetPosition.x) || !Double.isFinite(targetPosition.y)
                 || !Double.isFinite(targetPosition.z)) return null;
-        // The camera protection can refuse even an already-matching position.
+        // 即使位置已匹配，相机传送保护仍可拒绝本次请求。
         if (entity instanceof ServerPlayer player
                 && DimensionFilmCapture.shouldBlockPortalTeleport(player)
                 && !DimensionFilmCapture.isExplicitTransferInProgress(player)) return null;
@@ -40,7 +34,7 @@ public final class SeamlessTeleportation {
                 && moved.position().distanceToSqr(targetPosition) <= 1.0E-8 ? moved : null;
     }
 
-    /** Same contract as {@link #teleportEntity}; a successful player keeps its identity. */
+    /** 调用实体入口，只在结果仍是原ServerPlayer对象时返回该玩家，否则null。 */
     public static @Nullable ServerPlayer teleportPlayer(ServerPlayer player, ServerLevel targetLevel, Vec3 targetPosition) {
         return teleportEntity(player, targetLevel, targetPosition) == player ? player : null;
     }

@@ -13,15 +13,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Directional routes supplied by an Exposure filter data pack entry.
- *
- * <p>The map key is the dimension in which the camera is currently open. The
- * route value describes the dimension rendered by that filter from that
- * source. Keeping the source in the predicate is necessary because the same
- * target filter has a different coordinate conversion when viewed from
- * different dimensions.</p>
- */
+/** Exposure物品子谓词携带的来源维度→目标路由映射。 */
 public record DimensionCameraPredicate(Map<ResourceLocation, Route> routes)
         implements ItemSubPredicate {
     private static final Codec<Double> COORDINATE_SCALE_CODEC = Codec.DOUBLE.validate(scale ->
@@ -43,6 +35,7 @@ public record DimensionCameraPredicate(Map<ResourceLocation, Route> routes)
                     .forGetter(DimensionCameraPredicate::routes)
     ).apply(instance, DimensionCameraPredicate::new));
 
+    /** 紧凑构造器拒绝空路由和null项，并复制为保持顺序的只读Map。 */
     public DimensionCameraPredicate {
         if (routes == null || routes.isEmpty()) {
             throw new IllegalArgumentException("camera predicate routes cannot be empty");
@@ -57,12 +50,12 @@ public record DimensionCameraPredicate(Map<ResourceLocation, Route> routes)
         routes = Collections.unmodifiableMap(copy);
     }
 
-    /** Returns the route for the player's current dimension, or null if absent. */
+    /** 按来源维度查路由。 */
     public Route routeFor(ResourceLocation sourceDimension) {
         return sourceDimension == null ? null : routes.get(sourceDimension);
     }
 
-    /** 创造栏和路由解析共用同一个维度谓词提取方法。 */
+    /** 从Filter的子谓词集合找到本类型，找不到返回null。 */
     public static @Nullable DimensionCameraPredicate from(Filter filter) {
         for (ItemSubPredicate predicate : filter.predicate().subPredicates().values()) {
             if (predicate instanceof DimensionCameraPredicate camera) return camera;
@@ -70,15 +63,17 @@ public record DimensionCameraPredicate(Map<ResourceLocation, Route> routes)
         return null;
     }
 
+    /** 始终返回true：此子谓词负责携带路由，物品/组件筛选由外层Exposure谓词负责。 */
     @Override
     public boolean matches(ItemStack stack) {
-        // The surrounding ItemPredicate's items/components fields perform the
-        // actual stack check. This predicate only carries route metadata.
+        // 外层物品谓词负责物品和组件匹配，
+        // 此谓词仅携带维度路由数据。
         return true;
     }
 
-    /** One source-dimension to target-dimension camera route. */
+    /** 单条目标维度及比例记录。 */
     public record Route(ResourceLocation targetDimension, double coordinateScale) {
+        /** 紧凑构造器拒绝null目标以及非正/无穷比例，允许NaN作为自动比例标记。 */
         public Route {
             if (targetDimension == null) {
                 throw new IllegalArgumentException("camera route target dimension cannot be null");

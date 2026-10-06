@@ -8,9 +8,10 @@ import net.minecraft.client.renderer.LevelRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
-/** IP 托管远景渲染器，截图不反复重建玩家当前世界的透明渲染资源。 */
+/** 让支架远景截图保留已经编译好的区块网格。 */
 @Mixin(value = BackgroundScreenshotCaptureTask.class, remap = false)
 public abstract class BackgroundScreenshotRemoteMixin {
+    /** 支架远景截图时保留现有区块网格，避免截图前清空地形。 */
     @WrapOperation(method = "execute", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/LevelRenderer;graphicsChanged()V", remap = true))
     private void shuttershadow$keepWorldSections(LevelRenderer renderer, Operation<Void> original) {

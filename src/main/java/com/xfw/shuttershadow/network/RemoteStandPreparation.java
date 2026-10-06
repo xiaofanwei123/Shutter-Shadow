@@ -42,24 +42,28 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** 手动支架保留远景；红石只拍源维度，图片完成后执行胶卷传送。 */
+/** 管理服务端支架拍摄、照片完成确认和胶卷传送。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class RemoteStandPreparation {
     private static final long AUTHORIZATION_REFRESH_MILLIS = 20_000L;
     private static final int SOURCE_CAPTURE_TIMEOUT_TICKS = 2_400;
 
-    /** 仅延长当前照片的 Exposure 上传授权，不改变其它照片的超时规则。 */
+    /** ExposureRepositoryRemoteMixin实现的仓库预期上传窗口桥。 */
     public interface UploadWindow {
+        /** 为同一玩家/照片续期既有预期上传授权。 */
         void shuttershadow$refreshExpected(ServerPlayer player, String exposureId);
+        /** 取消同一玩家/照片的预期上传授权。 */
         void shuttershadow$cancelExpected(ServerPlayer player, String exposureId);
     }
     /** 红石计时拍摄跨 tick，需要将触发来源保留到真正的 takePhoto。 */
     private static final Map<UUID, Armed> ARMED = new HashMap<>();
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
 
+    /** 记录红石释放时支架和相机实例，计时器期间持续辨认红石拍摄。 */
     private record Armed(CameraStandEntity stand, ItemStack camera) {
     }
 
+    /** 支架拍摄依次经过准备、曝光、等待图片和完成状态。 */
     private enum State {
         PREPARING,
         EXPOSING,
@@ -67,6 +71,7 @@ public final class RemoteStandPreparation {
         FINISHING
     }
 
+    /** 保存支架/摄影师/相机实例、胶卷和滤镜快照、源视角、序号、Frame与延后声音。 */
     private static final class Pending {
         private final CameraItem item;
         private final CameraStandEntity stand;
@@ -97,6 +102,7 @@ public final class RemoteStandPreparation {
         private int sourceTimeoutTicks = SOURCE_CAPTURE_TIMEOUT_TICKS;
         private List<ServerPlayer> playersInFrame = List.of();
 
+        /** 保存拍摄参数、曝光失效标记、负序号和支架位置/转角，复制滤镜与胶卷快照。 */
         private Pending(CameraItem item, CameraStandEntity stand, ServerPlayer player,
                         ItemStack camera, RemoteCaptureContext remote, RemoteSceneStartS2C scene,
                         boolean sourceCapture) {
@@ -117,11 +123,12 @@ public final class RemoteStandPreparation {
             film = Attachment.FILM.get(camera).getForReading().copy();
         }
 
+        /** 以invalidReason是否为null表示事务仍有效。 */
         private boolean valid() {
             return invalidReason() == null;
         }
 
-        /** 区分主动失效与正常等待，避免取消日志只有下游的 TaskStoppedException。 */
+        /** 逐项检查支架和摄影师存活/身份、世界、出镜玩家、支架位置、转角以及附件快照。 */
         private String invalidReason() {
             if (stand.isRemoved() || !stand.isAlive()) return "stand removed";
             if (stand.getCamera() != camera) return "camera replaced";
@@ -149,7 +156,7 @@ public final class RemoteStandPreparation {
                     Attachment.FILM.get(camera).getForReading()) ? null : "film changed";
         }
 
-        /** Exposure 的 60 秒上传授权只延长当前照片，保留原来的上传回调。 */
+        /** 存在Exposure ID时续期仓库上传授权并更新下一次续期时间。 */
         private void refreshUploadAuthorization() {
             if (exposureId == null) return;
             ((UploadWindow) ExposureServer.exposureRepository())
@@ -157,11 +164,12 @@ public final class RemoteStandPreparation {
             nextAuthorizationRefresh = System.currentTimeMillis() + AUTHORIZATION_REFRESH_MILLIS;
         }
 
+        /** 按Holder实体、ServerPlayer和相机引用严格匹配事务。 */
         private boolean matches(CameraHolder holder, ServerPlayer player, ItemStack camera) {
             return holder.asHolderEntity() == stand && this.player == player && this.camera == camera;
         }
 
-        /** 生物扫描需要实际实体数据；玩家传送和照片均不等待目的地区块。 */
+        /** 非生物胶卷直接就绪。 */
         private boolean mobChunksReady() {
             if (remote == null || !MobDimensionFilmCapture.hasMobDimensionFilm(camera)) return true;
             Set<ChunkLoader> required = new HashSet<>();
@@ -183,6 +191,7 @@ public final class RemoteStandPreparation {
             return transferLoaders.stream().allMatch(loader -> loader.isFullyLoaded(player.getServer()));
         }
 
+        /** 红石在源世界按Exposure选玩家。 */
         private List<ServerPlayer> candidatesForPhoto() {
             // 红石拍原维度；手动取景的传送名单使用目标空间投影，不能先按源视锥筛掉。
             List<ServerPlayer> players = sourceCapture
@@ -194,6 +203,7 @@ public final class RemoteStandPreparation {
                     : RemoteCameraSession.syncedCapturePlayers(sequence, players);
         }
 
+        /** 移除本事务所有全局生物搜索loader并清集合。 */
         private void releaseTransferLoaders() {
             transferLoaders.forEach(loader ->
                     ChunkLoading.removeGlobalChunkLoader(player.getServer(), loader));
@@ -201,10 +211,11 @@ public final class RemoteStandPreparation {
         }
     }
 
+    /** 禁止实例化此工具类。 */
     private RemoteStandPreparation() {
     }
 
-    /** 只由 Exposure 红石组件中实际的 release 调用建立标记，手动快门不会走此入口。 */
+    /** 客户端直接执行原释放。 */
     public static void redstoneRelease(CameraStandEntity stand, Runnable release) {
         if (stand.level().isClientSide) {
             release.run();
@@ -232,14 +243,14 @@ public final class RemoteStandPreparation {
         }
     }
 
-    /** 准备、恢复拍摄与完成传送期间都沿用实际红石触发来源。 */
+    /** ARMED或已有sourceCapture事务即认定红石拍摄。 */
     public static boolean isRedstoneCapture(CameraStandEntity stand) {
         Pending pending = PENDING.get(stand.getUUID());
         return ARMED.containsKey(stand.getUUID())
                 || pending != null && pending.sourceCapture;
     }
 
-    /** 只根据滤镜路由限定维度相机，不查询或加载源照片不需要的目标世界。 */
+    /** 从服务端实际滤镜解析路由，并确认目标不同于来源。 */
     private static boolean hasDimensionRoute(CameraStandEntity stand, ItemStack camera) {
         if (!(camera.getItem() instanceof CameraItem)) return false;
         ServerLevel source = (ServerLevel) stand.level();
@@ -249,17 +260,17 @@ public final class RemoteStandPreparation {
                 && !route.dimension().equals(source.dimension().location());
     }
 
-    /** 手动远景准备或出片中的订阅不按普通孤儿订阅的时间上限清理。 */
+    /** 按负序号判断照片loader是否仍由支架Pending拥有。 */
     public static boolean ownsCapture(long sequence) {
         return PENDING.values().stream().anyMatch(pending -> pending.sequence == sequence);
     }
 
-    /** 生物胶卷复用同一张支架照片的等待状态，避免额外设置准备超时。 */
+    /** 按Exposure ID判断上传窗口是否仍被Pending拥有。 */
     public static boolean ownsExposure(String exposureId) {
         return PENDING.values().stream().anyMatch(pending -> exposureId.equals(pending.exposureId));
     }
 
-    /** 返回 true 时，Mixin 暂停原 takePhoto，后续服务端 tick 就绪后只恢复一次。 */
+    /** 仅接管支架。 */
     public static boolean beginIfNeeded(CameraItem item, CameraHolder holder,
                                         ServerPlayer player, ItemStack camera) {
         if (!(holder.asHolderEntity() instanceof CameraStandEntity stand)) return false;
@@ -291,7 +302,7 @@ public final class RemoteStandPreparation {
         return true;
     }
 
-    /** 真正曝光的光照、实体扫描与元数据使用准备时同一个远程观察者。 */
+    /** 只有手动支架且相机引用一致、处于EXPOSING/FINISHING才暴露准备好的远场Holder。 */
     public static RemoteCaptureContext preparedContext(CameraHolder holder, ItemStack camera) {
         Pending pending = PENDING.get(holder.asHolderEntity().getUUID());
         return pending != null && !pending.sourceCapture && pending.camera == camera
@@ -299,7 +310,7 @@ public final class RemoteStandPreparation {
                 ? pending.remote : null;
     }
 
-    /** 复用已经准备完的订阅；禁止在恢复 takePhoto 时再创建第二个 loader。 */
+    /** 对相同Holder/玩家/相机且处于EXPOSING的事务提供照片场景。 */
     public static RemoteSceneStartS2C captureScene(CameraHolder holder, ServerPlayer player,
                                                   ItemStack camera) {
         Pending pending = PENDING.get(holder.asHolderEntity().getUUID());
@@ -307,21 +318,21 @@ public final class RemoteStandPreparation {
                 && pending.matches(holder, player, camera) ? pending.scene : null;
     }
 
-    /** 源维度照片只传回执序号，不携带任何目标维度渲染参数。 */
+    /** 对正在EXPOSING的红石源照片提供负事务序号。 */
     public static Long sourceCaptureSequence(CameraHolder holder, ServerPlayer player, ItemStack camera) {
         Pending pending = PENDING.get(holder.asHolderEntity().getUUID());
         return pending != null && pending.sourceCapture && pending.state == State.EXPOSING
                 && pending.matches(holder, player, camera) ? pending.sequence : null;
     }
 
-    /** 生物传送独立读取目标世界；红石照片的世界、光照与元数据仍属于源维度。 */
+    /** 红石EXPOSING期间提供目标传送上下文，照片Holder仍是源支架。 */
     public static RemoteCaptureContext sourceTransferContext(CameraHolder holder, ItemStack camera) {
         Pending pending = PENDING.get(holder.asHolderEntity().getUUID());
         return pending != null && pending.sourceCapture && pending.camera == camera
                 && pending.state == State.EXPOSING ? pending.remote : null;
     }
 
-    /** 原 takePhoto 已建立上传授权后，记录该照片 ID，用于长时间绘制等待时续期。 */
+    /** 记录本次Exposure ID和下一次上传授权续期时刻。 */
     public static void recordExposure(CameraHolder holder, ServerPlayer player, ItemStack camera,
                                       String exposureId) {
         Pending pending = PENDING.get(holder.asHolderEntity().getUUID());
@@ -331,7 +342,7 @@ public final class RemoteStandPreparation {
         pending.nextAuthorizationRefresh = System.currentTimeMillis() + AUTHORIZATION_REFRESH_MILLIS;
     }
 
-    /** 保留原帧内容及事件时点，仅延后向胶卷追加照片。 */
+    /** 在EXPOSING阶段把胶卷Frame缓存到事务，延迟照片数加1至客户端成功回执。 */
     public static boolean deferFrameCommit(ItemStack camera, Frame frame) {
         Pending pending = PENDING.values().stream()
                 .filter(value -> value.camera == camera && value.state == State.EXPOSING)
@@ -342,7 +353,7 @@ public final class RemoteStandPreparation {
         return true;
     }
 
-    /** 支架的成功快门声随照片提交播放；实际快门组件仍由 Exposure 原样更新。 */
+    /** 在EXPOSING/WAITING_FOR_IMAGE阶段记录需延后的开闭快门音，不立即播放。 */
     public static boolean deferShutterSound(CameraHolder holder, boolean closing) {
         Pending pending = PENDING.get(holder.asHolderEntity().getUUID());
         if (pending == null || (pending.state != State.EXPOSING && pending.state != State.WAITING_FOR_IMAGE)) {
@@ -353,7 +364,7 @@ public final class RemoteStandPreparation {
         return true;
     }
 
-    /** 过片声音与冷却在写卷后处理，满卷判断也使用已提交的正确数量。 */
+    /** 缓存需等成片才执行的快门关闭动作。 */
     public static boolean deferShutterClosed(CameraHolder holder, Runnable action) {
         Pending pending = PENDING.get(holder.asHolderEntity().getUUID());
         if (pending == null || (pending.state != State.EXPOSING && pending.state != State.WAITING_FOR_IMAGE)) {
@@ -363,6 +374,7 @@ public final class RemoteStandPreparation {
         return true;
     }
 
+    /** 把准备好的Frame加入胶卷，强制同步支架实体和正在打开的附件菜单，最后播放完成快门音。 */
     private static void commitFrameAndPlaySound(Pending pending) {
         if (pending.frameToCommit == null) {
             throw new IllegalStateException("Remote capture completed without a prepared film frame");
@@ -396,26 +408,27 @@ public final class RemoteStandPreparation {
                 (System.nanoTime() - pending.exposureStartedAt) / 1_000_000L);
     }
 
+    /** 依次播放已延后的开/闭声，并运行已缓存的快门关闭动作。 */
     private static void playCompletionSound(Pending pending) {
         if (pending.openSoundPending) pending.item.getShutter().playOpenSound(pending.stand);
         if (pending.closeSoundPending) pending.item.getShutter().playCloseSound(pending.stand);
         if (pending.shutterClosedAction != null) pending.shutterClosedAction.run();
     }
 
-    /** 手动和红石都等图片完成后再传送，保证执行客户端仍在源维度。 */
+    /** EXPOSING阶段要求相机Mixin推迟玩家传送至完成回执。 */
     public static boolean shouldDeferTeleport(CameraHolder holder) {
         Pending pending = PENDING.get(holder.asHolderEntity().getUUID());
         return pending != null && pending.state == State.EXPOSING;
     }
 
-    /** 没有建立拍摄事务的快门，在原始世界查询结束后清除触发标记。 */
+    /** 未建立Pending的普通拍摄结束时移除红石ARMED标记。 */
     public static void finishOrdinaryCapture(CameraHolder holder) {
         if (!PENDING.containsKey(holder.asHolderEntity().getUUID())) {
             ARMED.remove(holder.asHolderEntity().getUUID());
         }
     }
 
-    /** 完成包先处理传送，再由网络层释放本次拍摄订阅；失败图片不触发传送。 */
+    /** 只处理摄影师/序号匹配的WAITING_FOR_IMAGE事务。 */
     public static void onCaptureFinished(ServerPlayer player, long sequence, boolean captured) {
         Pending pending = PENDING.values().stream()
                 .filter(value -> value.player == player && value.sequence == sequence)
@@ -439,7 +452,7 @@ public final class RemoteStandPreparation {
         }
     }
 
-    /** 失败不走原生 close，否则长曝光会在取消后补响快门与过片声。 */
+    /** 取消照片生物事务和仓库预期上传，丢弃Frame/ID。 */
     private static void discardPreparedShutter(Pending pending) {
         String exposureId = pending.exposureId != null ? pending.exposureId
                 : pending.frameToCommit != null ? pending.frameToCommit.identifier().id() : null;
@@ -458,7 +471,7 @@ public final class RemoteStandPreparation {
         }
     }
 
-    /** 只取消本次支架截图，保留玩家当前 HUD 与其它取景会话。 */
+    /** 撤销快门和传送loader，手动照片额外关照片订阅。 */
     private static void cancelPrepared(Pending pending) {
         discardPreparedShutter(pending);
         pending.releaseTransferLoaders();
@@ -469,6 +482,7 @@ public final class RemoteStandPreparation {
         }
     }
 
+    /** 清过期ARMED和无效Pending，续上传授权。 */
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         ARMED.values().removeIf(armed -> armed.stand().isRemoved()
@@ -549,6 +563,7 @@ public final class RemoteStandPreparation {
         }
     }
 
+    /** 登出时撤销该摄影师事务并释放传送及照片loader。 */
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
@@ -561,6 +576,7 @@ public final class RemoteStandPreparation {
         });
     }
 
+    /** 服务端停止清ARMED，撤销所有照片与loader，再清Pending。 */
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         ARMED.clear();

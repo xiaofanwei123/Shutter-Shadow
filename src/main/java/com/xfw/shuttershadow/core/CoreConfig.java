@@ -9,7 +9,7 @@ import net.neoforged.neoforge.common.ModConfigSpec;
 
 import java.util.List;
 
-/** 本地维度内核配置，使用 NeoForge 原生持久化与配置界面，不随服务器同步。 */
+/** 定义并应用 NeoForge 原生的通用内核配置。 */
 public final class CoreConfig {
     public static final String FILE_NAME = "shuttershadow-core.toml";
     public static final ModConfigSpec SPEC;
@@ -56,21 +56,24 @@ public final class CoreConfig {
         SPEC = builder.build();
     }
 
+    /** 工具类私有构造器。 */
     private CoreConfig() {}
 
+    /** 注册带说明和翻译键的布尔配置项。 */
     private static ModConfigSpec.BooleanValue define(ModConfigSpec.Builder builder, String key,
                                                      boolean defaultValue, String comment) {
         return builder.comment(comment).translation("shuttershadow.configuration.core." + key)
                 .define(key, defaultValue);
     }
 
-    /** 构造期只注册配置，真实值在 NeoForge 的加载及重新加载事件中应用。 */
+    /** 注册通用配置文件，并监听加载和重载。 */
     public static void register(ModContainer container, IEventBus eventBus) {
         container.registerConfig(ModConfig.Type.COMMON, SPEC, FILE_NAME);
         eventBus.addListener(ModConfigEvent.Loading.class, CoreConfig::apply);
         eventBus.addListener(ModConfigEvent.Reloading.class, CoreConfig::apply);
     }
 
+    /** 仅处理本模组配置，将已加载的选项应用到内核。 */
     static void apply(ModConfigEvent event) {
         if (event.getConfig().getSpec() != SPEC) return;
         CoreSettings.doCheckGlError = DO_CHECK_GL_ERROR.get();
@@ -81,6 +84,7 @@ public final class CoreConfig {
         Helper.LOGGER.info("Shuttershadow dimension runtime config applied");
     }
 
+    /** 根据全局开关和禁用列表判断是否显示警告。 */
     public static boolean shouldDisplayWarning(String warningKey) {
         return ENABLE_WARNING.get() && !DISABLED_WARNINGS.get().contains(warningKey);
     }

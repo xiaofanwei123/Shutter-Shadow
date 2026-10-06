@@ -30,9 +30,10 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-/** 生成相机诅咒及其获取方式，不进入附魔台候选集合。 */
-@EventBusSubscriber(modid = Shuttershadow.MODID, bus = EventBusSubscriber.Bus.MOD)
+/** 数据生成入口，不在游戏运行时生成配置资源。 */
+@EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class CameraEnchantmentData {
+    /** includeServer时生成附魔registry JSON和tags，includeClient时生成en_us/zh_cn。 */
     @SubscribeEvent
     public static void gatherData(GatherDataEvent event) {
         if (event.includeServer()) {
@@ -46,6 +47,7 @@ public final class CameraEnchantmentData {
         }
     }
 
+    /** 以Exposure camera作为支持物品集合，注册两种等级1的负面附魔定义。 */
     private static void bootstrap(BootstrapContext<Enchantment> context) {
         HolderSet<Item> cameras = HolderSet.direct(context.lookup(Registries.ITEM).getOrThrow(
                 ResourceKey.create(Registries.ITEM, ResourceLocation.fromNamespaceAndPath("exposure", "camera"))));
@@ -56,11 +58,14 @@ public final class CameraEnchantmentData {
         }
     }
 
+    /** 两附魔标签provider。 */
     private static final class Tags extends EnchantmentTagsProvider {
+        /** 传output、lookup、本命名空间及existing file helper给父类。 */
         private Tags(PackOutput output, CompletableFuture<HolderLookup.Provider> lookup, ExistingFileHelper files) {
             super(output, lookup, Shuttershadow.MODID, files);
         }
 
+        /** 把两附魔加入curse、treasure、tradeable及tooltip_order。 */
         @Override
         protected void addTags(HolderLookup.Provider provider) {
             // 村民出售附魔书；诅咒可在铁砧附上，也不会被砂轮洗掉。
@@ -71,11 +76,12 @@ public final class CameraEnchantmentData {
         }
     }
 
-    /** 保留已有翻译，补充诅咒和原生配置名称，避免两份同名语言资源。 */
+    /** 中英语言provider，保留非本次维护的旧键，重新生成附魔/配置/命令键。 */
     private static final class Languages extends LanguageProvider {
         private final Path source;
         private final boolean chinese;
 
+        /** 将PackOutput重定向到main/resources，保存语言源JSON路径及是否中文标记。 */
         private Languages(PackOutput output, String locale) {
             super(new PackOutput(output.getOutputFolder().resolve("../../main/resources").normalize()),
                     Shuttershadow.MODID, locale);
@@ -83,6 +89,7 @@ public final class CameraEnchantmentData {
             chinese = locale.equals("zh_cn");
         }
 
+        /** 读现有语言保留其他键，重写两附魔、所有配置标题/tooltip和tps反馈。 */
         @Override
         protected void addTranslations() {
             String failure = "enchantment.shuttershadow.exposure_failure";
@@ -166,6 +173,7 @@ public final class CameraEnchantmentData {
                     "Hides selected in-game notices by ID; the list may be empty. IDs: iris, nvidia, low_max_memory (low allocated memory), memory_not_enough (memory pressure), and mod_version_mismatch (protocol differences). Enter each ID separately. The master toggle hides all notices; existing chat messages are not removed.");
         }
 
+        /** 给单配置项生成shuttershadow.configuration.<key>及其.tooltip中英文。 */
         private void addConfigOption(String key, String chineseName, String englishName,
                                      String chineseTooltip, String englishTooltip) {
             String translationKey = "shuttershadow.configuration." + key;

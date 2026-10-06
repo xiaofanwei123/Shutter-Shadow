@@ -8,9 +8,10 @@ import net.minecraft.world.phys.AABB;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
-/** 只覆盖本次拍摄的查询范围，筛选、排序及遮挡继续由 Exposure 实现。 */
+/** 按当前拍摄上下文替换实体搜索半径。 */
 @Mixin(value = EntitiesInFrame.class, remap = false)
 public abstract class EntitiesInFrameCaptureRangeMixin {
+    /** 仅在本次查询指定范围时替换原版实体搜索半径。 */
     @WrapOperation(method = "get(Lnet/minecraft/world/entity/Entity;Lio/github/mortuusars/exposure/util/PointOfView;D)Ljava/util/List;",
             at = @At(value = "INVOKE", target = "Lnet/minecraft/world/phys/AABB;inflate(D)Lnet/minecraft/world/phys/AABB;",
                     remap = true))

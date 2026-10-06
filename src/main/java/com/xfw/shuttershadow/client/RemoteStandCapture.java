@@ -26,7 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-/** 手动支架远景照片：保留取景器画面，复用 Exposure 的截图和图像处理。 */
+/** 手动支架目标维度背景截图任务。 */
 public final class RemoteStandCapture extends Capture<Image> {
     private static final Map<Long, RemoteStandCapture> ACTIVE = new HashMap<>();
     /** 只在手动远景截图的同步调用内存在。 */
@@ -34,19 +34,19 @@ public final class RemoteStandCapture extends Capture<Image> {
 
     private final ClientPacketListener connection = Minecraft.getInstance().getConnection();
 
+    /** 过滤会长期改变界面的HideGuiAction和SetCameraEntityAction，组合其余动作后委托私有构造器。 */
     public RemoteStandCapture(RemoteSceneStartS2C scene, CameraStandEntity stand, CaptureAction[] actions) {
         this(scene, stand, new CompositeAction(Arrays.stream(actions)
-                // 离屏截图只渲染世界，不修改玩家的 F1 状态或跨 tick 镜头。
                 .filter(action -> !(action instanceof HideGuiAction)
                         && !(action instanceof SetCameraEntityAction))
                 .toArray(CaptureAction[]::new)));
     }
 
+    /** 创建目标维度截图任务并登记完成回调。 */
     private RemoteStandCapture(RemoteSceneStartS2C scene, CameraStandEntity stand,
                                CaptureAction actions) {
         super(new PreparedScreenshot(scene, stand, actions), delayOnly(actions));
         ACTIVE.put(scene.sequence(), this);
-        // 延迟仍由 Exposure 的摄影动作决定，截图不再等待额外区块或暖场帧。
         timer.whenEnded(() -> capturingTask.execute().whenComplete((result, error) ->
                 finish(error == null ? result : Result.error(ERROR_FAILED_GENERIC))));
         completableFuture.whenComplete((result, error) -> Minecraft.getInstance().execute(() -> {
@@ -58,29 +58,36 @@ public final class RemoteStandCapture extends Capture<Image> {
         }));
     }
 
+    /** 按序号找到任务并失败结束。 */
     public static void cancel(long sequence) {
         RemoteStandCapture capture = ACTIVE.get(sequence);
         if (capture != null) capture.fail(ERROR_FAILED_GENERIC);
     }
 
+    /** 取消并清除全部手动支架截图任务。 */
     static void cancelAll() {
         List.copyOf(ACTIVE.values()).forEach(capture -> capture.fail(ERROR_FAILED_GENERIC));
         ACTIVE.clear();
     }
 
-    /** 仅供手动远景照片的纹理恢复，不作用于红石源维度照片。 */
+    /** 判断是否正在绘制手动支架的目标维度截图。 */
     public static boolean isRenderingScreenshot() {
         return renderingScreenshot != null;
     }
 
+    /** 仅转发拍摄延迟动作，让截图任务自行执行拍摄前后的效果。 */
     private static CaptureAction delayOnly(CaptureAction actions) {
-        return new CaptureAction() {
+        return new CaptureAction() /** 代理延迟动作，避免提前影响玩家当前画面。 */ {
+            /** 返回原拍摄动作要求的延迟刻数。 */
             @Override public int requiredDelayTicks() { return actions.requiredDelayTicks(); }
+            /** 转发延时初始化。 */
             @Override public void initialize() { actions.initialize(); }
+            /** 转发每一刻的延迟动作。 */
             @Override public void delayTick(int ticks) { actions.delayTick(ticks); }
         };
     }
 
+    /** 推进延迟拍摄，玩家离开或连接变化时终止任务。 */
     @Override
     public void tick() {
         if (isDone()) return;
@@ -92,22 +99,26 @@ public final class RemoteStandCapture extends Capture<Image> {
         super.tick();
     }
 
+    /** 暂停计时，以指定错误结束截图任务。 */
     private void fail(TranslatableError error) {
         timer.pause();
         finish(Result.error(error));
     }
 
+    /** 仅完成一次任务并提交截图结果。 */
     private void finish(Result<Image> result) {
         if (isDone()) return;
         setDone();
         completableFuture.complete(result);
     }
 
+    /** 执行单次目标维度截图并确保恢复渲染状态。 */
     private static final class PreparedScreenshot extends BackgroundScreenshotCaptureTask {
         private final RemoteSceneStartS2C scene;
         private final CameraStandEntity stand;
         private final CaptureAction actions;
 
+        /** 保存固定场景、支架和捕获动作。 */
         private PreparedScreenshot(RemoteSceneStartS2C scene, CameraStandEntity stand,
                                    CaptureAction actions) {
             this.scene = scene;
@@ -115,6 +126,7 @@ public final class RemoteStandCapture extends Capture<Image> {
             this.actions = actions;
         }
 
+        /** 执行截图并返回完成结果，绘制异常时返回失败。 */
         @Override
         public CompletableFuture<Result<Image>> execute() {
             try {
@@ -125,7 +137,7 @@ public final class RemoteStandCapture extends Capture<Image> {
             }
         }
 
-        /** 临时镜头、远景和动作在同一次同步截图中恢复，不跨帧持有状态。 */
+        /** 临时使用支架镜头截取目标维度画面，完成后恢复原渲染状态。 */
         private Result<Image> captureFrame() {
             Minecraft mc = Minecraft.getInstance();
             Camera originalCamera = mc.gameRenderer.getMainCamera();

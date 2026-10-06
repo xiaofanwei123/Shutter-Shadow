@@ -13,12 +13,13 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Draws a small translated selfie-mode label at the screen's lower-right corner. */
+/** 在取景器右下角显示已本地化的自拍模式标签。 */
 @Mixin(value = ViewfinderOverlay.class, remap = false)
 public abstract class ViewfinderOverlaySelfieMixin {
     @Shadow
     protected Camera camera;
 
+    /** 注入 render 尾部：有相机且 inSelfieMode 时在右下角绘制本模组自拍翻译文字。 */
     @Inject(method = "render", at = @At("TAIL"))
     private void shuttershadow$renderSelfieLabel(GuiGraphics graphics,
                                                  DeltaTracker deltaTracker,

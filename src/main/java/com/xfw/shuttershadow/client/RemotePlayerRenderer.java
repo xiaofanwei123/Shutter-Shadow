@@ -15,22 +15,15 @@ import net.minecraft.world.phys.Vec3;
 import com.xfw.shuttershadow.access.IEWorldRenderer;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
-/**
- * 在 Immersive Portals 的目标世界渲染中绘制所有出镜来源玩家。
- *
- * <p>This is a render-only projection. The player is not inserted into the
- * target {@code ClientLevel}, and no entity or movement packet is generated.
- * 复用源世界真实 {@code AbstractClientPlayer} 的渲染器，保留已同步的皮肤、装备、姿势和动画。</p>
- */
+/** 手动支架远场中绘制源世界玩家模型，不移动真实玩家。 */
 public final class RemotePlayerRenderer {
+    /** 禁止实例化此工具类。 */
     private RemotePlayerRenderer() {}
 
+    /** 仅在WorldRenderInfo目标渲染中取得投影玩家，逐个绘制。 */
     public static void render(LevelRenderer levelRenderer, Camera camera,
                                DeltaTracker deltaTracker, PoseStack poseStack,
                                MultiBufferSource bufferSource) {
-        // LevelRenderer also runs during world join and ordinary vanilla frames.
-        // IP only owns a WorldRenderInfo stack while a remote pass is active;
-        // getTopRenderInfo() throws when that stack is empty.
         if (!WorldRenderInfo.isRendering()) return;
         float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
         WorldRenderInfo renderInfo = WorldRenderInfo.getTopRenderInfo();
@@ -42,21 +35,18 @@ public final class RemotePlayerRenderer {
         }
     }
 
-    /** 只由目标视锥和目标渲染深度决定可见像素，跳过一人不影响其余投影。 */
+    /** 将玩家剔除盒移动到投影位置，目标frustum剔除。 */
     private static void renderProjection(ImmersiveCameraClient.PlayerProjection projection,
                                          IEWorldRenderer remoteRenderer,
                                          float partialTick, PoseStack poseStack,
                                          MultiBufferSource bufferSource) {
         Vec3 position = projection.position();
 
-        // The target renderer has already prepared this frustum for the
-        // current remote camera. Use the mapped player's target-world box so
-        // a stand does not draw the operator when he is outside the view.
         Frustum frustum = remoteRenderer.portal_getFrustum();
         if (frustum != null) {
             //TODO:是否增加原版额外的 0.5 格剔除余量。
             AABB box = projection.player().getBoundingBoxForCulling()
-                    // .inflate(0.5D)
+                    // 可选的额外半格剔除余量，当前未启用。
                     .move(position.subtract(projection.player().position()));
             if (!frustum.isVisible(box)) return;
         }
@@ -65,10 +55,6 @@ public final class RemotePlayerRenderer {
         EntityRenderer<? super AbstractClientPlayer> entityRenderer =
                 dispatcher.getRenderer(projection.player());
         if (entityRenderer == null) return;
-
-        // EntityRenderDispatcher.render() also emits a shadow using the
-        // entity's source-world position. Calling the native renderer directly
-        // keeps the model and animation while avoiding a source-world shadow.
         Vec3 renderOffset = entityRenderer.getRenderOffset(projection.player(), partialTick);
         Vec3 cameraPosition = projection.cameraPosition();
         float yRot = net.minecraft.util.Mth.lerp(partialTick,

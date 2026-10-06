@@ -6,10 +6,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 
-/** 只补充相机额外实体订阅；实体 tick 和本维度跟踪由原版负责。 */
+/** 服务端远维度实体同步刷新。 */
 public final class EntitySync {
+    /** 工具类私有构造器。 */
     private EntitySync() {}
 
+    /** 遍历各世界的实体跟踪器，刷新远程观察者。 */
     public static void update(MinecraftServer server) {
         server.getProfiler().push("shuttershadow_remote_entity_tracking");
         try {

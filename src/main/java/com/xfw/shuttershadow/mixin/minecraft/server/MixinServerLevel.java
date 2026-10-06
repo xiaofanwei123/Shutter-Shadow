@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.storage.ServerLevelData;
@@ -14,6 +14,7 @@ import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTracking;
 
 import java.util.List;
 
+/** 保持有相机订阅的服务端维度更新，并提供调试世界信息。 */
 @Mixin(ServerLevel.class)
 public abstract class MixinServerLevel {
     
@@ -22,7 +23,8 @@ public abstract class MixinServerLevel {
     private ServerLevelData serverLevelData;
     
     
-    //in vanilla if a dimension has no player and no forced chunks then it will not tick
+    // 原版不会更新既无玩家也无强制加载区块的维度。
+    /** 让仅被相机观察的维度继续执行服务端更新。 */
     @Redirect(
         method = "Lnet/minecraft/server/level/ServerLevel;tick(Ljava/util/function/BooleanSupplier;)V",
         at = @At(
@@ -38,7 +40,8 @@ public abstract class MixinServerLevel {
         return list.isEmpty();
     }
     
-    // for debug
+    // 用于调试。
+    /** toString 开头返回 ServerWorld + 维度ID + 存档名称，日志能明确世界而非只看同名存档。 */
     @Inject(method = "Lnet/minecraft/server/level/ServerLevel;toString()Ljava/lang/String;", at = @At("HEAD"), cancellable = true)
     private void onToString(CallbackInfoReturnable<String> cir) {
         final ServerLevel this_ = (ServerLevel) (Object) this;

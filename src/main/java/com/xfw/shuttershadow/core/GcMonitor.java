@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
@@ -23,10 +23,11 @@ import java.lang.management.ManagementFactory;
 import java.util.List;
 import java.util.WeakHashMap;
 
-// Java does not provide a program-accessible interface to tell GC pause time.
-// (There are GC logs, but not accessible from within program)
-// so I can only roughly measure it.
+// 运行时没有可直接读取垃圾回收暂停时长的接口。
+// 垃圾回收日志也无法在程序内部直接获取，
+// 因此这里只进行近似测量。
 // Shuttershadow 第三轮修改：仅将 MiB 换算迁至公共工具，保留内存监测与告警行为。
+/** 监测垃圾回收停顿和堆内存压力。 */
 public class GcMonitor {
     private static boolean memoryNotEnough = false;
 
@@ -47,7 +48,8 @@ public class GcMonitor {
     
     public static final String LINK = "https://filmora.wondershare.com/game-recording/how-to-allocate-more-ram-to-minecraft.html";
     
-    //@OnlyIn(Dist.CLIENT)
+    // 仅供客户端使用。
+    /** 注册客户端帧前采样。 */
     public static void initClient() {
         NeoForge.EVENT_BUS.addListener(CoreSettings.PreGameRenderEvent.class, preGameRenderEvent -> GcMonitor.update());
         
@@ -72,6 +74,7 @@ public class GcMonitor {
         }
     }
     
+    /** 专用服务端游戏刻结束后采样，避免单人重复采样。 */
     public static void initCommon() {
         NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class, event -> {
             if (event.getServer().isDedicatedServer()) {
@@ -80,10 +83,11 @@ public class GcMonitor {
         });
     }
     
+    /** 检测垃圾回收和长停顿，并检查堆内存压力。 */
     private static void update() {
         double longPauseThresholdSeconds = 0.3;
         if (Helper.toMiB(Runtime.getRuntime().maxMemory()) < 2049) {
-            // if only allocated 2048 MB, be more sensitive
+            // 仅分配 2048 兆字节时，使用更敏感的内存判定。
             longPauseThresholdSeconds = 0.1;
         }
         
@@ -108,6 +112,7 @@ public class GcMonitor {
         
     }
     
+    /** 结合剩余堆内存与近期停顿判断内存不足，并限制提醒频率。 */
     private static void check() {
         long maxMemory = Runtime.getRuntime().maxMemory();
         long totalMemory = Runtime.getRuntime().totalMemory();
@@ -118,7 +123,7 @@ public class GcMonitor {
         
         if (Helper.toMiB(maxMemory - usedMemory) < 300 && timeFromLongPause < Helper.secondToNano(2)) {
             if (memoryNotEnough) {
-                // show message the second time
+                // 第二次检测到内存紧张时才显示消息。
                 
                 if (!PlatformBridge.isDedicatedServer()) {
                     informMemoryNotEnoughClient();
@@ -126,7 +131,7 @@ public class GcMonitor {
             }
             
             if (LOG_LIMIT.tryDecrement()) {
-                // When using ZGC, the memory usage amount is decreased with a delay
+                // 使用 ZGC 时，内存占用的下降存在延迟。
                 
                 LOGGER.warn(String.format(
                     """
@@ -150,7 +155,8 @@ public class GcMonitor {
         }
     }
     
-    //@OnlyIn(Dist.CLIENT)
+    // 仅供客户端使用。
+    /** 配置允许时显示内存不足提醒。 */
     private static void informMemoryNotEnoughClient() {
         if (!CoreConfig.shouldDisplayWarning("memory_not_enough")) return;
         Minecraft client = Minecraft.getInstance();
@@ -170,6 +176,7 @@ public class GcMonitor {
         }
     }
     
+    /** 返回最近GC检查的内存不足状态。 */
     public static boolean isMemoryNotEnough() {
         return memoryNotEnough;
     }

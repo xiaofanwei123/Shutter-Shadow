@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.network;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.google.common.collect.ImmutableMap;
 import com.mojang.logging.LogUtils;
@@ -22,9 +22,11 @@ import org.slf4j.Logger;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.util.McHelper;
 
+/** 维度类型映射payload容器。 */
 public class MiscNetworking {
     private static final Logger LOGGER = LogUtils.getLogger();
     
+    /** 发送维度ID→维度类型ID的NBT映射，客户端创建次级ClientLevel必须先有此表。 */
     public static record DimIdSyncPacket(
         CompoundTag dimTypeTag
     ) implements CustomPacketPayload {
@@ -36,6 +38,7 @@ public class MiscNetworking {
                         (b, p) -> p.write(b), DimIdSyncPacket::read
                 );
 
+        /** 遍历服务端已存在世界并取得注册维度类型ID。 */
         public static DimIdSyncPacket createFromServer(MinecraftServer server) {
             RegistryAccess registryManager = server.registryAccess();
             Registry<DimensionType> dimensionTypes = registryManager.registryOrThrow(Registries.DIMENSION_TYPE);
@@ -64,26 +67,31 @@ public class MiscNetworking {
             return new DimIdSyncPacket(dimIdToDimTypeIdTag);
         }
         
+        /** 委托createFromServer生成完整映射。 */
         public static DimIdSyncPacket createPacket(MinecraftServer server) {
             return DimIdSyncPacket.createFromServer(server);
         }
 
+        /** 返回dimension_id_sync类型。 */
         @Override
         public @NotNull Type<? extends CustomPacketPayload> type() {
             return TYPE;
         }
 
+        /** 把维度类型CompoundTag写入buffer。 */
         public void write(FriendlyByteBuf buf) {
             buf.writeNbt(dimTypeTag);
         }
 
+        /** 读取NBT并创建payload。 */
         public static DimIdSyncPacket read(FriendlyByteBuf buf) {
             CompoundTag typeTag = buf.readNbt();
 
             return new DimIdSyncPacket(typeTag);
         }
-        // must be handled early
-        // should not be handled in client main thread, otherwise it may be late
+        // 必须在早期处理维度映射，
+        // 不排入客户端主线程，以免后续数据包先于映射到达。
+        /** 在网络处理时把NBT转为不可变ResourceKey映射，赋给ClientWorldLoader.dimIdToDimTypeId。 */
         public void handleOnNetworkingThread() {
             ImmutableMap.Builder<ResourceKey<Level>, ResourceKey<DimensionType>> builder =
                 new ImmutableMap.Builder<>();

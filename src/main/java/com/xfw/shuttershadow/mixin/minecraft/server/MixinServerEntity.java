@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
@@ -13,12 +13,14 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import com.xfw.shuttershadow.network.PacketRedirection;
 
+/** 按实体所属维度路由生成、移除和配对同步消息。 */
 @Mixin(value = ServerEntity.class, priority = 1200)
 public abstract class MixinServerEntity {
     @Shadow
     @Final
     private Entity entity;
     
+    /** 按实体所属维度发送生成、移除及其它配对同步包。 */
     @Redirect(
         method = {"removePairing", "addPairing"},
         at = @At(

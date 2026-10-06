@@ -1,24 +1,24 @@
 package com.xfw.shuttershadow.core;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.neoforged.bus.api.Event;
 import com.xfw.shuttershadow.util.MyTaskList;
 
 // Shuttershadow 第三轮裁剪：移除生成系统及管理命令独占的全局配置。
 // Shuttershadow 第四轮裁剪：移除无调用、无读取的旧开关。
+/** 保存内核运行配置及客户端任务队列。 */
 public class CoreSettings {
     
-    /**
-     * It fires right after ticking client world, which is earlier than the Fabric event.
-     */
+    /** 客户端真实世界游戏刻结束后的内部事件。 */
     public static class PostClientTickEvent extends Event {}
 
+    /** 每帧开始渲染前发布的内部事件。 */
     public static class PreGameRenderEvent extends Event {}
     
-    // executed after ticking. will be cleared when client encounter loading screen
+    // 游戏刻结束后执行，客户端进入加载界面时清空。
     public static final MyTaskList CLIENT_TASK_LIST = new MyTaskList();
     
-    // won't be cleared
+    // 不随加载界面清空。
     public static final MyTaskList PRE_GAME_RENDER_TASK_LIST = new MyTaskList();
 
     

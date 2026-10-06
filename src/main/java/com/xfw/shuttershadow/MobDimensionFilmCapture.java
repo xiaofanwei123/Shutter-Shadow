@@ -28,16 +28,17 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** 生物胶卷只追加图片验收后的实体迁移，手持和支架共用同一流程。 */
+/** 生物胶卷在FrameAdded时记录首个非玩家生物，在上传完成或曝光失效免上传完成时把生物从目标维度带到源维度。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class MobDimensionFilmCapture {
     private static final long UPLOAD_TIMEOUT_MILLIS = 120_000L;
-    /** 按上传者和照片 ID 关联，与 Exposure 的上传授权一致。 */
+    /** 摄影师UUID与Exposure照片标识组成的事务键。 */
     private record PendingKey(UUID player, String exposureId) {
     }
 
     private static final Map<PendingKey, Pending> PENDING = new HashMap<>();
 
+    /** 固定目标生物UUID及映射回源维度的位置。 */
     private static final class Pending {
         private final ServerPlayer photographer;
         private final ServerLevel source;
@@ -47,6 +48,7 @@ public final class MobDimensionFilmCapture {
         private ChunkLoader loader;
         private long expiresAt = System.currentTimeMillis() + UPLOAD_TIMEOUT_MILLIS;
 
+        /** 保存源/目标世界、实体UUID和反向映射目的地，注册半径0的全局保活loader。 */
         private Pending(ServerPlayer photographer, RemoteCaptureContext remote, LivingEntity entity) {
             this.photographer = photographer;
             source = (ServerLevel) remote.source().asHolderEntity().level();
@@ -59,11 +61,12 @@ public final class MobDimensionFilmCapture {
             ChunkLoading.addGlobalChunkLoader(photographer.getServer(), loader);
         }
 
+        /** 移除当前全局loader。 */
         private void release() {
             ChunkLoading.removeGlobalChunkLoader(photographer.getServer(), loader);
         }
 
-        /** 等待上传期间只跟随被选中实体，不扩大照片的区块订阅。 */
+        /** 按UUID在目标世界找到实体，跨区块时先注册新半径0 loader，再释放旧loader。 */
         private void followEntity() {
             Entity entity = target.getEntity(entityId);
             if (entity == null) return;
@@ -77,6 +80,7 @@ public final class MobDimensionFilmCapture {
             loader = replacement;
         }
 
+        /** 确认仍是存活非玩家LivingEntity，再调用无缝实体API。 */
         private void transfer() {
             try {
                 Entity entity = target.getEntity(entityId);
@@ -95,14 +99,16 @@ public final class MobDimensionFilmCapture {
         }
     }
 
+    /** 禁止实例化此工具类。 */
     private MobDimensionFilmCapture() {
     }
 
+    /** 判断FILM附件物品是否为MobDimensionFilmRollItem。 */
     public static boolean hasMobDimensionFilm(ItemStack camera) {
         return Attachment.FILM.get(camera).getForReading().getItem() instanceof MobDimensionFilmRollItem;
     }
 
-    /** 手动照片沿用原生名单；红石源照片的生物传送单独查询服务端目标场景。 */
+    /** 读取远场照片事件中的首个非玩家实体。 */
     @SubscribeEvent
     public static void onFrameAdded(FrameAddedEvent event) {
         if (!hasMobDimensionFilm(event.getCamera())) return;
@@ -128,7 +134,7 @@ public final class MobDimensionFilmCapture {
         if (previous != null) previous.release();
     }
 
-    /** 复用 Exposure 的三参数授权：图片上传验收成功后才传送，不增加数据包。 */
+    /** 如果存在属于该摄影师的Pending，改写Exposure仓库上传完成回调。 */
     public static boolean expectUpload(ExposureRepository repository, ServerPlayer player, String id) {
         PendingKey key = new PendingKey(player.getUUID(), id);
         Pending pending = PENDING.get(key);
@@ -140,7 +146,7 @@ public final class MobDimensionFilmCapture {
         return true;
     }
 
-    /** 曝光失效没有图片上传，由已完成的同一次服务端拍摄事件直接提交迁移。 */
+    /** 免曝光上传路径按摄影师和照片ID确认Pending后立即移除、传送。 */
     public static void completeWithoutUpload(ServerPlayer player, String id) {
         PendingKey key = new PendingKey(player.getUUID(), id);
         Pending pending = PENDING.get(key);
@@ -149,7 +155,7 @@ public final class MobDimensionFilmCapture {
         }
     }
 
-    /** 取消照片立即释放实体保活；已注册的迟到上传回调也不能再触发迁移。 */
+    /** 取消指定照片Pending并释放保活loader。 */
     public static void cancelPending(ServerPlayer player, String exposureId) {
         PendingKey key = new PendingKey(player.getUUID(), exposureId);
         Pending pending = PENDING.get(key);
@@ -158,6 +164,7 @@ public final class MobDimensionFilmCapture {
         }
     }
 
+    /** 服务端tick续期仍由支架准备事务拥有的照片，清理超时项，否则跟随目标生物移动其保活区块。 */
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         long now = System.currentTimeMillis();
@@ -176,6 +183,7 @@ public final class MobDimensionFilmCapture {
         });
     }
 
+    /** 登出时释放属于该摄影师的全部Pending。 */
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         PENDING.values().removeIf(pending -> {
@@ -185,6 +193,7 @@ public final class MobDimensionFilmCapture {
         });
     }
 
+    /** 停止服务端时释放全部loader并清空Pending。 */
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         PENDING.values().forEach(Pending::release);

@@ -6,33 +6,25 @@ import net.minecraft.server.level.ServerPlayer;
 
 import java.util.Objects;
 
-/** 额外区块加载入口；全部操作都必须在所属服务器线程执行。 */
+/** 公开额外区块加载API，要求服务器线程及当前真实世界/在线玩家身份。 */
 public final class ChunkLoading {
+    /** 禁止实例化此工具类。 */
     private ChunkLoading() {}
 
-    /**
-     * 仅在服务端保活区域，不向客户端额外同步。保存此加载对象原实例，
-     * 并在使用结束、超时或取消时释放。
-     */
+    /** 校验目标后登记全局loader。 */
     public static void addGlobalChunkLoader(MinecraftServer server, ChunkLoader loader) {
         validateTarget(server, loader);
         RemoteChunkTracking.addGlobalAdditionalChunkLoader(server, loader);
     }
 
-    /**
-     * 按对象身份释放；新建的同值对象不能释放原请求，重复释放无副作用。
-     * 现有票据继续通过正常调度过期，不会立即强制卸载区块。
-     */
+    /** 校验线程及loader非null后按身份移除全局loader。 */
     public static void removeGlobalChunkLoader(MinecraftServer server, ChunkLoader loader) {
         validateThread(server);
         Objects.requireNonNull(loader, "loader");
         RemoteChunkTracking.removeGlobalAdditionalChunkLoader(server, loader);
     }
 
-    /**
-     * 加载区域，并向此玩家同步区块及允许其看到的实体。两端都需安装
-     * Shuttershadow。这里只安排更新，不保证客户端立即收到或渲染完毕。
-     */
+    /** 校验服务器/维度/在线玩家实例后登记玩家loader。 */
     public static void addChunkLoaderForPlayer(ServerPlayer player, ChunkLoader loader) {
         Objects.requireNonNull(player, "player");
         MinecraftServer server = player.getServer();
@@ -43,10 +35,7 @@ public final class ChunkLoading {
         RemoteChunkTracking.addPerPlayerAdditionalChunkLoader(player, loader);
     }
 
-    /**
-     * 使用原加载对象及原玩家实例释放，玩家退出或复活后仍可清理原请求。
-     * 重复释放无副作用；正常调度会移除不再被其它请求覆盖的订阅。
-     */
+    /** 校验线程后按身份移除玩家loader。 */
     public static void removeChunkLoaderForPlayer(ServerPlayer player, ChunkLoader loader) {
         Objects.requireNonNull(player, "player");
         validateThread(player.getServer());
@@ -54,11 +43,13 @@ public final class ChunkLoading {
         RemoteChunkTracking.removePerPlayerAdditionalChunkLoader(player, loader);
     }
 
+    /** 服务器非null且server.isSameThread才通过，否则抛异常。 */
     static void validateThread(MinecraftServer server) {
         Objects.requireNonNull(server, "server");
         if (!server.isSameThread()) throw new IllegalStateException("Chunk loading requires the server thread");
     }
 
+    /** 复用线程校验，再检查loader及目标维度存在。 */
     private static void validateTarget(MinecraftServer server, ChunkLoader loader) {
         validateThread(server);
         Objects.requireNonNull(loader, "loader");

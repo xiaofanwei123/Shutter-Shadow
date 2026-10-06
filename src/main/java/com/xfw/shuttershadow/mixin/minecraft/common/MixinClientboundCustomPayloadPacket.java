@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.common;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.network.protocol.common.ClientCommonPacketListener;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.xfw.shuttershadow.network.PacketRedirection;
 
+/** 拦截并处理携带目标维度的重定向数据包。 */
 @Mixin(ClientboundCustomPayloadPacket.class)
 public class MixinClientboundCustomPayloadPacket {
     
@@ -20,7 +21,8 @@ public class MixinClientboundCustomPayloadPacket {
     @Final
     private CustomPacketPayload payload;
 
-    // this is run before Fabric API try to handle the packet
+    // 在加载器处理自定义数据包之前拦截重定向数据。
+    /** 拦截维度重定向数据包，并在对应客户端世界中处理。 */
     @Inject(
         method = "handle(Lnet/minecraft/network/protocol/common/ClientCommonPacketListener;)V",
         at = @At("HEAD"),

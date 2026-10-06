@@ -11,9 +11,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** 红石原生支架截图省略玩家模型、名字和阴影，普通世界和手动相机不受影响。 */
+/** 仅在红石源维度截图中隐藏玩家模型。 */
 @Mixin(EntityRenderDispatcher.class)
 public abstract class SourceStandEntityRenderMixin {
+    /** 红石源世界截图时隐藏玩家模型。 */
     @Inject(method = "render", at = @At("HEAD"), cancellable = true)
     private void shuttershadow$hidePhotographedPlayers(Entity entity, double x, double y, double z,
                                                        float yaw, float partialTick, PoseStack poses,

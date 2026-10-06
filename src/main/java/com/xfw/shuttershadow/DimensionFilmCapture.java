@@ -33,46 +33,42 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * One-way physical selfie hand-off.
- *
- * <p>The player is moved only when Exposure is about to take a selfie with a
- * dimension filter and the special film roll. Immersive Portals performs the
- * dimension switch without the vanilla loading overlay. The original Exposure
- * call is delayed until the client confirms that its local world has changed;
- * after that call the player remains in the target dimension.</p>
- */
+/** 管理玩家维度胶卷的自拍和支架传送事务。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class DimensionFilmCapture {
     private static final int READY_TIMEOUT_TICKS = 100;
-    /** Prevents a stale/global IP portal from immediately reversing this move. */
+    /** 短暂保护本次传送，避免旧状态立即触发反向移动。 */
     private static final int PORTAL_TRANSFER_LOCK_TICKS = 200;
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final Map<UUID, Integer> PORTAL_TRANSFER_LOCKS = new HashMap<>();
     /** 手动和红石支架共同使用的个人传送偏好。 */
     private static final Map<UUID, Boolean> STAND_TELEPORT_PREFERENCES = new HashMap<>();
-    /** True only while this class is inside IP's explicit transfer call. */
+    /** 仅在本类执行明确的无缝传送调用期间为真。 */
     private static final Set<UUID> EXPLICIT_TRANSFERS = new HashSet<>();
     private static long nextTransaction;
 
+    /** 禁止实例化此工具类。 */
     private DimensionFilmCapture() {
     }
 
-    /** Implemented by the CameraItem mixin to invoke Exposure's protected method. */
+    /** 供相机注入钩子调用原生拍摄方法的接口。 */
     public interface TakePhotoInvoker {
+        /** 以原CameraHolder、服务端玩家与相机物品调用Exposure原拍摄方法。 */
         void shuttershadow$invokeTakePhoto(CameraHolder holder, ServerPlayer player, ItemStack camera);
     }
 
+    /** 标记自拍传送等待世界切换和执行拍摄的阶段。 */
     private enum State {
         WAITING_FOR_CLIENT,
         CALLING_EXPOSURE
     }
 
-    /** Source information captured before the player is moved to the target level. */
+    /** 来源维度、玩家脚底位置与群系记录，供传送后照片保留来源信息。 */
     static record SourceSnapshot(ResourceLocation dimension, Vec3 position,
                                  ResourceLocation biome) {
     }
 
+    /** 单个玩家胶卷自拍事务，持有原相机引用、目标维度、来源快照、状态及年龄。 */
     private static final class Pending {
         private final long transaction;
         private final ServerPlayer player;
@@ -84,6 +80,7 @@ public final class DimensionFilmCapture {
         private State state = State.WAITING_FOR_CLIENT;
         private int age;
 
+        /** 保存事务参数。 */
         private Pending(long transaction, ServerPlayer player, CameraItem item,
                         CameraHolder holder, ItemStack camera,
                         ResourceKey<Level> targetDimension, SourceSnapshot source) {
@@ -97,7 +94,7 @@ public final class DimensionFilmCapture {
         }
     }
 
-    /** Returns source metadata only during the synchronous delayed photo call. */
+    /** 仅当该操作者事务处于CALLING_EXPOSURE时提供传送前来源快照，给照片额外数据使用。 */
     static SourceSnapshot activeSource(CameraHolder holder) {
         ServerPlayer player = holder.getServerPlayerExecutingExposure().orElse(null);
         if (player == null) return null;
@@ -107,19 +104,16 @@ public final class DimensionFilmCapture {
                 ? pending.source : null;
     }
 
-    /**
-     * Intercepts only the first Exposure takePhoto call. Returning true tells
-     * the mixin to cancel that call until the IP client world is ready.
-     */
+    /** 拦截手持玩家胶卷自拍，解析当前滤镜路由，保存来源快照，开启事务、传送并发送DimensionFilmStart。 */
     public static boolean beginIfNeeded(CameraItem item, CameraHolder holder,
                                         ServerPlayer player, ItemStack camera) {
-        // A stand is handled after Exposure's takePhoto returns. Keeping the player in
-        // the source level during the shot preserves the stand's camera holder
-        // and the active Immersive Portals remote capture session.
+        // 支架传送在原拍摄返回后处理，拍照期间保持玩家在来源世界，
+        // 以保留原支架拍摄者
+        // 和正在使用的远维度拍摄会话。
         if (holder.asHolderEntity() instanceof CameraStandEntity) return false;
         Pending current = PENDING.get(player.getUUID());
         if (current != null) {
-            // The delayed invocation is allowed through exactly once.
+            // 延迟调用只放行一次。
             return current.state != State.CALLING_EXPOSURE;
         }
 
@@ -133,7 +127,7 @@ public final class DimensionFilmCapture {
 
         ResourceKey<Level> targetKey = ResourceKey.create(Registries.DIMENSION, mapping.dimension());
         if (targetKey.equals(player.level().dimension())) {
-            // Already in the requested level. Exposure can capture normally.
+            // 已在目标世界，直接使用原生拍摄。
             return false;
         }
         ServerLevel target = player.getServer().getLevel(targetKey);
@@ -148,8 +142,8 @@ public final class DimensionFilmCapture {
         PENDING.put(player.getUUID(), created);
 
         try {
-            // IP keeps the player object and camera UI alive while replacing the
-            // client world, avoiding vanilla's respawn/loading overlay.
+            // 无缝传送保留玩家实例和相机界面，
+            // 只替换客户端世界，避免原版重生和加载界面。
             teleport(player, targetKey, targetPosition);
             PacketDistributor.sendToPlayer(player,
                     new DimensionFilmStartS2C(transaction, targetKey.location()));
@@ -161,7 +155,7 @@ public final class DimensionFilmCapture {
         }
     }
 
-    /** 手动和红石支架在拍摄后传送同一份 Exposure 出镜名单中的玩家。 */
+    /** 支架普通入口：确认玩家胶卷，解析远场并计算出镜玩家后委托列表重载。 */
     public static void teleportStandPlayersAfterPhoto(CameraHolder holder, ItemStack camera) {
         if (!(holder.asHolderEntity() instanceof CameraStandEntity) || !hasPlayerDimensionFilm(camera)) return;
         RemoteCaptureContext remote = RemoteCaptureContext.resolve(holder, camera);
@@ -169,7 +163,7 @@ public final class DimensionFilmCapture {
         teleportStandPlayersAfterPhoto(remote, camera, remote.playersInFrame(camera));
     }
 
-    /** 支架使用曝光时固定的出镜名单，后来走入镜头的人不参与这次传送。 */
+    /** 对冻结的出镜玩家逐个确认存活、来源世界、在线身份及个人同意状态。 */
     public static void teleportStandPlayersAfterPhoto(RemoteCaptureContext remote, ItemStack camera,
                                                        List<ServerPlayer> players) {
         if (!hasPlayerDimensionFilm(camera)) return;
@@ -195,7 +189,7 @@ public final class DimensionFilmCapture {
         }
     }
 
-    /** 手持自拍与支架共用公开无缝传送入口和防回传保护，标记在 finally 中释放。 */
+    /** 设定短暂传送保护锁，标记显式胶卷传送作用域，在finally移除作用域。 */
     private static void teleport(ServerPlayer player, ResourceKey<Level> targetKey, Vec3 targetPosition) {
         UUID uuid = player.getUUID();
         PORTAL_TRANSFER_LOCKS.put(uuid, PORTAL_TRANSFER_LOCK_TICKS);
@@ -208,27 +202,27 @@ public final class DimensionFilmCapture {
         }
     }
 
-    /** Called by the IP mixin before a portal-driven player move. */
+    /** 返回玩家是否仍处于胶卷传送保护期，供底层拒绝意外重复传送。 */
     public static boolean shouldBlockPortalTeleport(ServerPlayer player) {
         return PORTAL_TRANSFER_LOCKS.containsKey(player.getUUID());
     }
 
-    /** Returns whether the current IP call was initiated by this mod. */
+    /** 检查当前调用是否来自明确的胶卷传送作用域，允许该次预期移动穿过保护。 */
     public static boolean isExplicitTransferInProgress(ServerPlayer player) {
         return EXPLICIT_TRANSFERS.contains(player.getUUID());
     }
 
-    /** 更新该玩家对所有支架维度胶卷传送的接受偏好。 */
+    /** 保存玩家对支架胶卷传送的同意状态。 */
     public static void setStandTeleportPreference(ServerPlayer player, boolean accepted) {
         STAND_TELEPORT_PREFERENCES.put(player.getUUID(), accepted);
     }
 
-    /** 截图与真实传送共用同一份玩家偏好；拒绝传送不会禁用远景拍摄。 */
+    /** 读取同意状态，未设置默认允许。 */
     public static boolean acceptsStandTeleport(ServerPlayer player) {
         return STAND_TELEPORT_PREFERENCES.getOrDefault(player.getUUID(), true);
     }
 
-    /** Called by the client after IP has installed the target ClientLevel. */
+    /** 验证客户端确认的事务号、状态、当前目标世界及胶卷自拍状态。 */
     public static void clientReady(ServerPlayer player, long transaction) {
         Pending pending = PENDING.get(player.getUUID());
         if (pending == null || pending.transaction != transaction
@@ -245,15 +239,16 @@ public final class DimensionFilmCapture {
 
         pending.state = State.CALLING_EXPOSURE;
         try {
-            // The mixin sees CALLING_EXPOSURE and lets the original method run.
+            // 执行拍摄状态会让注入钩子放行原方法。
             invoker.shuttershadow$invokeTakePhoto(pending.holder, player, pending.camera);
         } finally {
-            // This is intentionally one-way: the player stays in the target
-            // dimension after the photograph is created.
+            // 拍摄结束后保持玩家位于目标维度，
+            // 不自动传送回来源世界。
             PENDING.remove(player.getUUID(), pending);
         }
     }
 
+    /** 拍摄事务开始时记录来源维度、位置与当前位置群系。 */
     private static SourceSnapshot snapshot(ServerPlayer player) {
         ResourceLocation biome = player.serverLevel().getBiome(player.blockPosition())
                 .unwrapKey()
@@ -263,23 +258,20 @@ public final class DimensionFilmCapture {
                 player.position(), biome);
     }
 
-    /**
-     * Checks the camera state without resolving a source route. After the
-     * teleport the player is already in the target dimension, so the original
-     * source-to-target route is intentionally no longer present.
-     */
+    /** 确认相机在自拍模式且满足玩家维度胶卷条件。 */
     private static boolean hasDimensionFilmSelfie(CameraItem item, ItemStack camera) {
         if (!item.isInSelfieMode(camera)) return false;
         return hasPlayerDimensionFilm(camera);
     }
 
-    /** Player dimension film is the only film allowed to trigger player selfie teleportation. */
+    /** 确认附件胶卷为PlayerDimensionFilmRollItem且滤镜非空。 */
     public static boolean hasPlayerDimensionFilm(ItemStack camera) {
         ItemStack film = Attachment.FILM.get(camera).getForReading();
         return film.getItem() instanceof PlayerDimensionFilmRollItem
                 && !Attachment.FILTER.get(camera).getForReading().isEmpty();
     }
 
+    /** 移除死亡、离线、过期或不再等待客户端的事务。 */
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         Iterator<Map.Entry<UUID, Pending>> iterator = PENDING.entrySet().iterator();
@@ -295,6 +287,7 @@ public final class DimensionFilmCapture {
         PORTAL_TRANSFER_LOCKS.values().removeIf(ticks -> ticks <= 0);
     }
 
+    /** 玩家登出时清除其事务、保护锁、显式作用域及支架同意状态。 */
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
@@ -305,6 +298,7 @@ public final class DimensionFilmCapture {
         }
     }
 
+    /** 服务端停止时清空全部事务与玩家偏好，避免下一次单人世界复用静态状态。 */
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         PENDING.clear();

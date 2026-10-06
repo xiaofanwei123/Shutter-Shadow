@@ -21,14 +21,16 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import java.util.Collection;
 import java.util.Locale;
 
-/** 通过公开 API 立即执行跨维度传送，沿用相机保护和原版命令坐标语义。 */
+/** 注册OP权限2的/tps命令，原版实体选择器、维度参数和坐标参数接入无缝传送API。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class SeamlessTeleportCommand {
     private static final SimpleCommandExceptionType INVALID_POSITION = new SimpleCommandExceptionType(
             Component.translatable("commands.teleport.invalidPosition"));
 
+    /** 禁止实例化此工具类。 */
     private SeamlessTeleportCommand() {}
 
+    /** 注册tps→targets→dimension→pos参数树，解析后调用本类teleport。 */
     @SubscribeEvent
     public static void register(RegisterCommandsEvent event) {
         event.getDispatcher().register(Commands.literal("tps")
@@ -43,7 +45,7 @@ public final class SeamlessTeleportCommand {
                                                 Vec3Argument.getVec3(context, "pos")))))));
     }
 
-    /** 坐标先由命令源解析，再统一校验；任何目标移动前都拒绝越界坐标。 */
+    /** 检查世界坐标边界，逐个调用SeamlessTeleportation。 */
     private static int teleport(CommandSourceStack source, Collection<? extends Entity> targets,
                                 ServerLevel dimension, Vec3 position) throws CommandSyntaxException {
         if (!Level.isInSpawnableBounds(BlockPos.containing(position))) {
@@ -76,6 +78,7 @@ public final class SeamlessTeleportCommand {
         return completed;
     }
 
+    /** 使用Locale.ROOT把反馈坐标格式化为三位小数。 */
     private static String formatCoordinate(double coordinate) {
         return String.format(Locale.ROOT, "%.3f", coordinate);
     }

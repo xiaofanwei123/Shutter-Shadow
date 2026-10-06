@@ -13,12 +13,13 @@ import com.xfw.shuttershadow.util.CaptureEntitySearchRange;
 
 import java.util.List;
 
-/** 未注册到世界的投影实体无法被 get 扫描，因此直接调用 Exposure 的原生判定方法。 */
+/** 集中复用Exposure视锥、可见距离与遮挡检查。 */
 public final class ExposureVisibility {
+    /** 禁止实例化此工具类。 */
     private ExposureVisibility() {
     }
 
-    /** 手动和红石支架共用 Exposure 的视锥、遮挡、焦距与存活判定。 */
+    /** 在临时实体搜索半径作用域内调用EntitiesInFrame，然后筛出玩家并再次以真实距离限制。 */
     public static List<Player> playersInFrame(CameraHolder holder, ItemStack camera) {
         if (!(camera.getItem() instanceof CameraItem item)) return List.of();
         int radius = ShuttershadowConfig.standPlayerRadius();
@@ -32,6 +33,7 @@ public final class ExposureVisibility {
                 .toList();
     }
 
+    /** 先排除相机与实体各轴距离超过128的候选，再以95%FOV创建视锥，检查眼睛入镜、焦距可见距离及无遮挡。 */
     public static boolean isVisible(PointOfView view, Entity entity, double fov) {
         BlockPos cameraBlock = BlockPos.containing(view.pos());
         BlockPos entityBlock = entity.blockPosition();

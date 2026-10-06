@@ -1,6 +1,6 @@
 package com.xfw.shuttershadow.core;
 
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.xfw.shuttershadow.event.ClientExitEvent;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
@@ -39,8 +39,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
+/** 统一管理当前连接的各维度客户端世界、渲染器和光照资源。 */
 @SuppressWarnings("resource")
-//@OnlyIn(Dist.CLIENT)
+// 仅供客户端使用。
 public class ClientWorldLoader {
     private static final Logger LOGGER = LoggerFactory.getLogger(ClientWorldLoader.class);
     
@@ -61,18 +62,22 @@ public class ClientWorldLoader {
     
     private static boolean isCreatingClientWorld = false;
     
+    /** 注册退出世界时清理维度类型的回调。 */
     public static void init() {
         NeoForge.EVENT_BUS.addListener(ClientExitEvent.class, (e) -> dimIdToDimTypeId = null);
     }
     
+    /** 返回主世界映射是否已登记。 */
     public static boolean getIsInitialized() {
         return isInitialized;
     }
     
+    /** 判断是否正在创建远程世界，避免递归清理或重载。 */
     public static boolean getIsCreatingClientWorld() {
         return isCreatingClientWorld;
     }
     
+    /** 更新其他维度的世界和渲染器，并更新各维度光照。 */
     public static void tick() {
         CLIENT_WORLD_MAP.values().forEach(world -> {
             if (CLIENT.level != world) {
@@ -107,11 +112,13 @@ public class ClientWorldLoader {
         
     }
     
+    /** 逐个清理光照辅助并清映射。 */
     public static void disposeRenderHelpers() {
         RENDER_HELPER_MAP.values().forEach(DimensionRenderHelper::cleanUp);
         RENDER_HELPER_MAP.clear();
     }
     
+    /** 在目标世界上下文中更新实体、世界和光照。 */
     private static void tickRemoteWorld(ClientLevel newWorld) {
         withSwitchedWorld(newWorld, () -> {
             try {
@@ -128,6 +135,7 @@ public class ClientWorldLoader {
         });
     }
     
+    /** 释放远程渲染资源，并清空各维度世界与初始化状态。 */
     public static void cleanUp() {
         WORLD_RENDERER_MAP.values().forEach(
             ClientWorldLoader::disposeWorldRenderer
@@ -145,6 +153,7 @@ public class ClientWorldLoader {
         isInitialized = false;
     }
     
+    /** 解绑世界并释放远程渲染器，保留当前主渲染器。 */
     private static void disposeWorldRenderer(LevelRenderer worldRenderer) {
         worldRenderer.setLevel(null);
         if (worldRenderer != CLIENT.levelRenderer) {
@@ -153,6 +162,7 @@ public class ClientWorldLoader {
         }
     }
     
+    /** 初始化后取得指定维度的渲染器。 */
     @NotNull
     public static LevelRenderer getWorldRenderer(ResourceKey<Level> dimension) {
         initializeIfNeeded();
@@ -165,8 +175,8 @@ public class ClientWorldLoader {
                 dimension.location(), new Throwable()
             );
             
-            // the world renderer is created along with the world
-            // so create the world now
+            // 世界渲染器随客户端世界一起创建，
+            // 因此先确保客户端世界存在。
             getWorld(dimension);
             
             result = WORLD_RENDERER_MAP.get(dimension);
@@ -180,10 +190,7 @@ public class ClientWorldLoader {
     }
     
     
-    /**
-     * Get the client world and create if missing.
-     * If the dimension intId is invalid, it will throw an error
-     */
+    /** 在客户端线程取得或创建指定维度的世界。 */
     @NotNull
     public static ClientLevel getWorld(ResourceKey<Level> dimension) {
         Validate.notNull(dimension, "dimension is null");
@@ -200,10 +207,7 @@ public class ClientWorldLoader {
         return result;
     }
     
-    /**
-     * Get the client world and create if missing.
-     * If the dimension intId is invalid, it will return null
-     */
+    /** 取得或创建服务器已公布的世界，非法维度返回空值。 */
     @Nullable
     public static ClientLevel getOptionalWorld(ResourceKey<Level> dimension) {
         Validate.notNull(dimension, "dimension is null");
@@ -216,6 +220,7 @@ public class ClientWorldLoader {
         return null;
     }
     
+    /** 按维度懒创建光照辅助并验证世界维度一致。 */
     public static DimensionRenderHelper getDimensionRenderHelper(ResourceKey<Level> dimension) {
         initializeIfNeeded();
         
@@ -228,13 +233,14 @@ public class ClientWorldLoader {
         return result;
     }
     
+    /** 校验当前玩家世界，并登记主世界及其渲染资源。 */
     @SuppressWarnings("ConstantValue")
     public static void initializeIfNeeded() {
         if (!isInitialized) {
             Validate.isTrue(
                 CLIENT.level != null, "level is null"
             );
-            // note: client.levelRenderer is not necessarily not null due to mixin
+            // 混入可能使当前世界渲染器为空。
             Validate.isTrue(
                 CLIENT.levelRenderer != null, "levelRenderer is null"
             );
@@ -260,6 +266,7 @@ public class ClientWorldLoader {
         }
     }
     
+    /** 创建目标维度的客户端世界和渲染器，完成资源加载后登记。 */
     @SuppressWarnings("DataFlowIssue")
     private static ClientLevel createSecondaryClientWorld(ResourceKey<Level> dimension) {
         Validate.notNull(CLIENT.player, "player is null");
@@ -273,7 +280,7 @@ public class ClientWorldLoader {
         CLIENT.getProfiler().push("create_world");
         isCreatingClientWorld = true;
         
-        int chunkLoadDistance = 3; // my own chunk manager doesn't need it
+        int chunkLoadDistance = 3; // 自定义区块管理器不使用此距离。
         
         LevelRenderer worldRenderer = null;
         boolean registered = false;
@@ -313,8 +320,8 @@ public class ClientWorldLoader {
                 .registryOrThrow(Registries.DIMENSION_TYPE)
                 .getHolderOrThrow(dimensionTypeKey);
             
-            // currently use a separated level data object
-            // day time is not shared between worlds
+            // 每个世界使用独立的世界数据对象，
+            // 不同世界的时间互不共享。
             ClientLevel.ClientLevelData properties = new ClientLevel.ClientLevelData(
                 currentProperty.getDifficulty(),
                 currentProperty.isHardcore(),
@@ -326,17 +333,17 @@ public class ClientWorldLoader {
                 dimension,
                 dimensionType,
                 chunkLoadDistance,
-                simulationDistance,// seems that client world does not use this
+                simulationDistance,// 客户端世界当前不使用模拟距离。
                 CLIENT::getProfiler,
                 worldRenderer,
                 CLIENT.level.isDebug(),
                 CLIENT.level.getBiomeManager().biomeZoomSeed
             );
             
-            // all worlds share the same map data map
+            // 所有世界共享同一份地图数据。
             ((IEClientLevel_Accessor) newWorld).ip_setMapData(mapData);
 
-            // all worlds share the same tick rate manager
+            // 所有世界共享同一个游戏刻速率管理器。
             ((IEClientWorld) newWorld).ip_setTickRateManager(CLIENT.level.tickRateManager());
 
             worldRenderer.setLevel(newWorld);
@@ -380,11 +387,13 @@ public class ClientWorldLoader {
         return newWorld;
     }
     
+    /** 从主连接取得服务器公布的维度键集合。 */
     public static Set<ResourceKey<Level>> getServerDimensions() {
         assert CLIENT.player != null;
         return CLIENT.player.connection.levels();
     }
     
+    /** 返回已初始化的所有客户端世界集合。 */
     public static Collection<ClientLevel> getClientWorlds() {
         Validate.isTrue(isInitialized);
         
@@ -393,6 +402,7 @@ public class ClientWorldLoader {
     
     private static boolean isReloadingOtherWorldRenderers = false;
     
+    /** 在对应世界上下文中重载各远程维度的渲染器。 */
     @SuppressWarnings("Convert2MethodRef")
     public static void _onWorldRendererReloaded() {
         Validate.isTrue(CLIENT.isSameThread());
@@ -418,8 +428,8 @@ public class ClientWorldLoader {
                 withSwitchedWorld(
                     world,
                     () -> {
-                        // cannot be replaced into method reference
-                        // because levelRenderer field is actually mutable
+                        // 此处不能改为方法引用，
+                        // 因为世界渲染器字段会随世界切换而变化。
                         CLIENT.levelRenderer.allChanged();
                     }
                 );
@@ -430,9 +440,7 @@ public class ClientWorldLoader {
         }
     }
     
-    /**
-     * It will not switch the dimension of client player
-     */
+    /** 临时切换世界执行操作，结束后恢复原有世界与渲染上下文。 */
     @SuppressWarnings({"ReassignedVariable", "DataFlowIssue"})
     public static <T> T withSwitchedWorld(ClientLevel newWorld, Supplier<T> supplier) {
         Validate.isTrue(CLIENT.isSameThread(), "not on client thread");
@@ -462,7 +470,7 @@ public class ClientWorldLoader {
                 LOGGER.error("Respawn packet should not be redirected");
                 originalWorld = CLIENT.level;
                 originalWorldRenderer = CLIENT.levelRenderer;
-                // client.levelRenderer is not final by mixin.
+                // 混入允许重新赋值当前世界渲染器。
             }
             
             CLIENT.level = originalWorld;
@@ -472,6 +480,7 @@ public class ClientWorldLoader {
         }
     }
     
+    /** 临时切换世界执行无返回值操作，并保证恢复上下文。 */
     public static void withSwitchedWorld(ClientLevel newWorld, Runnable runnable) {
         withSwitchedWorld(newWorld, () -> {
             runnable.run();
@@ -479,6 +488,7 @@ public class ClientWorldLoader {
         });
     }
     
+    /** 在有效目标世界中执行操作，非法维度记录日志并跳过。 */
     public static void withSwitchedWorldFailSoft(ResourceKey<Level> dim, Runnable runnable) {
         ClientLevel world = getOptionalWorld(dim);
         

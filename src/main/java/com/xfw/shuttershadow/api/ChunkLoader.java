@@ -9,12 +9,9 @@ import net.minecraft.world.level.Level;
 
 import java.util.Objects;
 
-/**
- * 包含边界的正方形区域，中心和半径的单位都是区块。半径零覆盖中心区块，
- * 半径一覆盖 3 × 3 个区块。构造对象不会加载区块。区域可按值比较或去重，
- * 但 {@link ChunkLoading} 中的注册必须按对象身份释放。
- */
+/** 公开API的不可变区块窗口：维度、XZ区块中心、方形切比雪夫半径。 */
 public record ChunkLoader(ResourceKey<Level> dimension, int x, int z, int radius) {
+    /** 紧凑构造器要求维度非null，半径非负且坐标±半径不溢出。 */
     public ChunkLoader {
         Objects.requireNonNull(dimension, "dimension");
         if (radius < 0 || radius == Integer.MAX_VALUE
@@ -24,10 +21,7 @@ public record ChunkLoader(ResourceKey<Level> dimension, int x, int z, int radius
         }
     }
 
-    /**
-     * 在服务器线程检查可用于服务端 tick 的完整区块及实体加载状态，目标维度不存在时返回 false。
-     * 不会主动加载区块，也不代表客户端收包、地形编译、光照或画面已经就绪。
-     */
+    /** 校验服务端线程，检查所有窗口区块已有实体ticking状态。 */
     public boolean isFullyLoaded(MinecraftServer server) {
         ChunkLoading.validateThread(server);
         ServerLevel serverWorld = server.getLevel(dimension);
@@ -42,7 +36,7 @@ public record ChunkLoader(ResourceKey<Level> dimension, int x, int z, int radius
         return true;
     }
 
-    /** 枚举区域，并传入各区块与中心的切比雪夫距离。 */
+    /** 遍历(2r+1)²窗口，回调携带维度、XZ及到中心最大轴距。 */
     public void foreachChunkPos(ChunkPosConsumer consumer) {
         Objects.requireNonNull(consumer, "consumer");
         for (int dx = -radius; dx <= radius; dx++) {
@@ -52,13 +46,16 @@ public record ChunkLoader(ResourceKey<Level> dimension, int x, int z, int radius
         }
     }
 
+    /** 输出维度、中心XZ和半径调试文本。 */
     @Override
     public String toString() {
         return "(%s %d %d %d)".formatted(dimension.location(), x, z, radius);
     }
 
+    /** 区块窗口遍历函数接口。 */
     @FunctionalInterface
     public interface ChunkPosConsumer {
+        /** 接收一个区块坐标和切比雪夫中心距离。 */
         void consume(ResourceKey<Level> dimension, int x, int z, int distanceToSource);
     }
 }

@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.compat.sodium;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.caffeinemc.mods.sodium.client.render.chunk.occlusion.OcclusionCuller;
 import org.spongepowered.asm.mixin.Mixin;
@@ -8,8 +8,10 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
 // Shuttershadow 第六轮：远景相机禁用洞穴遮挡，玩家正常视角使用 Sodium 原值。
+/** 仅在相机远景渲染中关闭洞穴遮挡剔除。 */
 @Mixin(value = OcclusionCuller.class, remap = false)
 public class MixinSodiumOcclusionCuller {
+    /** 修改 findVisible 开头的 useOcclusionCulling 参数。 */
     @ModifyVariable(method = "findVisible", at = @At("HEAD"), argsOnly = true)
     private boolean modifyUseOcclusionCulling(boolean originalValue) {
         return !WorldRenderInfo.isRendering() && originalValue;

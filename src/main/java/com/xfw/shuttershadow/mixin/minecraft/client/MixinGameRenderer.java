@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
@@ -23,6 +23,7 @@ import com.xfw.shuttershadow.core.render.RenderStates;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 import com.xfw.shuttershadow.client.ImmersiveCameraClient;
 
+/** 接入相机远景绘制，并管理多世界渲染状态和生命周期。 */
 @Mixin(GameRenderer.class)
 // Shuttershadow 第六轮：撤销物理门渲染与自动穿门，保留相机变换和多世界状态。
 public abstract class MixinGameRenderer implements IEGameRenderer {
@@ -42,13 +43,14 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     @Final
     private Minecraft minecraft;
 
-    /** 实时取景和 Exposure 离屏截图共用远景入口。 */
+    /** renderLevel 开头调用 ImmersiveCameraClient.render。 */
     @Inject(method = "renderLevel", at = @At("HEAD"), cancellable = true)
     private void shuttershadow$renderImmersiveCamera(DeltaTracker deltaTracker, CallbackInfo ci) {
         if (ImmersiveCameraClient.render(deltaTracker)) ci.cancel();
     }
 
     // 相机远景渲染期间保留主世界准星目标，避免在临时世界中重算。
+    /** 远景渲染时保留源世界的准星交互目标。 */
     @Inject(method = "Lnet/minecraft/client/renderer/GameRenderer;pick(F)V", at = @At("HEAD"), cancellable = true)
     private void onUpdateTargetedEntity(float partialTick, CallbackInfo ci) {
         if (Minecraft.getInstance().level != null) {
@@ -58,6 +60,7 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         }
     }
 
+    /** 世界渲染前更新相机状态、发送渲染事件并上传远景网格。 */
     @Inject(method = "render", at = @At("HEAD"))
     private void onFarBeforeRendering(
         DeltaTracker deltaTracker, boolean renderWorldIn, CallbackInfo ci
@@ -65,11 +68,11 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         if (minecraft.level == null) {
             return;
         }
-        if (!renderWorldIn) { // when respawning, it will runTick and execute rendering
+        if (!renderWorldIn) { // 重生期间仍会执行客户端刻及渲染。
             return;
         }
         minecraft.getProfiler().push("ip_pre_render");
-        // Note do not use delta tick. use partial tick.
+        // 使用当前刻的插值进度，不使用刻增量。
         float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
         RenderStates.updatePreRenderInfo(partialTick);
         NeoForge.EVENT_BUS.post(new CoreSettings.PreGameRenderEvent());
@@ -78,9 +81,10 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         
     }
     
-    //before rendering world (not triggered when rendering portal)
+    // 玩家主世界渲染前执行，远景渲染不会触发。
     
-    //after rendering world (not triggered when rendering portal)
+    // 玩家主世界渲染后执行，远景渲染不会触发。
+    /** 世界渲染后清理临时状态并刷新延迟光照。 */
     @Inject(
         method = "render",
         at = @At(
@@ -99,11 +103,12 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         minecraft.getProfiler().pop();
     }
     
-    //special rendering in third person view
+    // 处理第三人称视角的相机变换。
     
     
     
-    //resize all world renderers when resizing window
+    // 窗口大小改变时同步调整所有世界渲染器。
+    /** 窗口调整大小时同步调整后台世界渲染器。 */
     @Inject(method = "Lnet/minecraft/client/renderer/GameRenderer;resize(II)V", at = @At("RETURN"))
     private void onOnResized(int int_1, int int_2, CallbackInfo ci) {
         if (ClientWorldLoader.getIsInitialized()) {
@@ -117,7 +122,8 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         }
     }
     
-    // not using ModifyArgs because ModifyArgs seems broken on Forge
+    // 此处使用重定向，规避 Forge 上 ModifyArgs 的行为问题。
+    /** 按当前相机状态缩放视角摇晃的横向偏移。 */
     @ModifyArg(
         method = "bobView",
         at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V"),
@@ -127,6 +133,7 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         return (float) (f * RenderStates.getViewBobbingOffsetMultiplier());
     }
     
+    /** 按当前相机状态缩放视角摇晃的竖向偏移。 */
     @ModifyArg(
         method = "bobView",
         at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V"),
@@ -136,6 +143,7 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         return (float) (f * RenderStates.getViewBobbingOffsetMultiplier());
     }
     
+    /** 按当前相机状态缩放视角摇晃的前后偏移。 */
     @ModifyArg(
         method = "bobView",
         at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V"),
@@ -146,16 +154,19 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     }
 
 
+    /** 设置 GameRenderer.lightTexture，内部切世界时换用对应维度光照纹理并在退出恢复。 */
     @Override
     public void ip_setLightmapTextureManager(LightTexture manager) {
         lightTexture = manager;
     }
     
+    /** 读取 renderHand，供临时世界渲染保存原手部绘制选项。 */
     @Override
     public boolean ip_getDoRenderHand() {
         return renderHand;
     }
     
+    /** 设置 mainCamera，供远景与截图切换观察相机，调用者负责恢复。 */
     @Override
     public void ip_setCamera(Camera camera_) {
         mainCamera = camera_;

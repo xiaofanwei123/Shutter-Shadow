@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
@@ -11,8 +11,10 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.xfw.shuttershadow.access.IEPlayerMoveC2SPacket;
 
+/** 移动包创建时保存玩家真实维度，避免延迟包坐标串维度。 */
 @Mixin(ServerboundMovePlayerPacket.class)
 public class MixinServerBoundMovePlayerPacket {
+    /** 在移动包创建后记录玩家当前维度。 */
     @Inject(
         method = "<init>",
         at = @At("RETURN")

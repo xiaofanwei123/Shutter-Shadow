@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** 仅手动远景照片恢复颜色附件，红石源照片使用原生管线。 */
+/** 手动远景截图切换目标时，恢复 Iris 的颜色纹理附件。 */
 @Pseudo
 @Mixin(targets = "net.irisshaders.iris.pipeline.FinalPassRenderer", remap = false)
 public abstract class IrisCameraColorTargetMixin {
@@ -22,6 +22,7 @@ public abstract class IrisCameraColorTargetMixin {
     @Unique private boolean shuttershadow$cameraColorPending;
     @Unique private RenderTarget shuttershadow$cameraTarget;
 
+    /** 注入 renderFinalPass 开头。 */
     @Inject(method = "renderFinalPass", at = @At("HEAD"))
     private void shuttershadow$checkCameraColor(CallbackInfo ci) {
         if (RemoteStandCapture.isRenderingScreenshot() && BackgroundScreenshotCaptureTask.isCapturing()) {
@@ -39,6 +40,7 @@ public abstract class IrisCameraColorTargetMixin {
         lastColorTextureVersion = version ^ 1;
     }
 
+    /** 注入 renderFinalPass 返回。 */
     @Inject(method = "renderFinalPass", at = @At("RETURN"))
     private void shuttershadow$finishCameraColor(CallbackInfo ci) {
         if (!BackgroundScreenshotCaptureTask.isCapturing()) {

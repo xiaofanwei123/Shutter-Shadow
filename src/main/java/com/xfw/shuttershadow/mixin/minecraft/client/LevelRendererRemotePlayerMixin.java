@@ -15,9 +15,10 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** Adds the local operator to the remote scene only for this client's render pass. */
+/** 在相机远景或手动截图中绘制源维度玩家投影。 */
 @Mixin(LevelRenderer.class)
 public abstract class LevelRendererRemotePlayerMixin {
+    /** 在远景场景中绘制源维度操作员的玩家投影。 */
     @Inject(method = "renderLevel", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/MultiBufferSource$BufferSource;endLastBatch()V",
             ordinal = 0, shift = At.Shift.BEFORE))

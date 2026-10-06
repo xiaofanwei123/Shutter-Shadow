@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
@@ -35,6 +35,7 @@ import com.xfw.shuttershadow.util.CountDownInt;
 
 import java.util.Set;
 
+/** 同步玩家移动和传送确认的维度，避免旧位置包污染新世界。 */
 @Mixin(value = ServerGamePacketListenerImpl.class, priority = 900)
 public abstract class MixinServerGamePacketListenerImpl {
     @Shadow
@@ -52,6 +53,7 @@ public abstract class MixinServerGamePacketListenerImpl {
     @Final
     static Logger LOGGER;
     
+    /** Shadow 引用原 getPlayer，保留原连接玩家查询声明。 */
     @Shadow
     public abstract ServerPlayer getPlayer();
     
@@ -62,26 +64,13 @@ public abstract class MixinServerGamePacketListenerImpl {
     @Unique
     private int ip_wrongMovePacketCount = 0;
     
-    /**
-     * Attach the dimension information to
-     * {@link ServerGamePacketListenerImpl#awaitingPositionFromClient}
-     *
-     * The teleport system: when server wants to teleport a player,
-     * the server will send the {@link ClientboundPlayerPositionPacket}, then
-     * set {@link ServerGamePacketListenerImpl#awaitingPositionFromClient}
-     * and {@link ServerGamePacketListenerImpl#awaitingTeleport} counter.
-     *
-     * Before the client sending {@link ServerboundAcceptTeleportationPacket},
-     * the position packets are ignored, and some of the item using packets are ignored.
-     *
-     * Attach the dimension information to the position, to avoid messing up coordinates
-     * of different dimensions.
-     */
+    /** 保存待确认传送位置所属维度，避免客户端回执混用不同维度的坐标。 */
     @SuppressWarnings("JavadocReference")
     @Unique
     private @Nullable ResourceKey<Level> ip_dimOfAwaitingPosition;
     
-    //do not process move packet when client dimension and server dimension are not synced
+    // 客户端与服务端维度尚未同步时忽略移动包。
+    /** 拒绝维度不同步的移动包，连续异常时重新同步玩家位置。 */
     @Inject(
         method = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;handleMovePlayer(Lnet/minecraft/network/protocol/game/ServerboundMovePlayerPacket;)V",
         at = @At(
@@ -95,8 +84,8 @@ public abstract class MixinServerGamePacketListenerImpl {
         ResourceKey<Level> packetDimension = ((IEPlayerMoveC2SPacket) packet).ip_getPlayerDimension();
         
         if (packetDimension == null) {
-            // this actually never happens, because the vanilla client will disconnect immediately
-            // when receiving the position sync packet that has the extra dimension field
+            // 原版客户端收到扩展位置包时通常已断开连接。
+            // 因此正常情况下不会收到缺少维度字段的移动包。
             LOGGER.error("Player move packet is missing dimension info. Maybe the player client does not have Shuttershadow");
             ServerTaskList.of(player.server).addTask(() -> {
                 player.connection.disconnect(Component.literal(
@@ -139,8 +128,9 @@ public abstract class MixinServerGamePacketListenerImpl {
     }
     
     /**
-     * @reason make PlayerPositionLookS2CPacket contain dimension data and do some special handling
+     * 更新待确认位置及维度，并发送扩展位置同步包。
      * @author qouteall
+     * @reason 为原版位置同步包附加维度信息及传送确认处理。
      */
     @Overwrite
     @VanillaRuntimeHooks
@@ -148,7 +138,7 @@ public abstract class MixinServerGamePacketListenerImpl {
         double x, double y, double z, float yaw, float pitch,
         Set<RelativeMovement> relativeAttrs
     ) {
-        // it may request teleport while this.player is marked removed during respawn
+        // 重生期间玩家可能已标记移除，仍有传送请求到达。
         
         if (player.getRemovalReason() != null) {
             LOGGER.error(
@@ -190,8 +180,9 @@ public abstract class MixinServerGamePacketListenerImpl {
         this.player.connection.send(lookPacket);
     }
 
-    // if the awaiting position is in a different dimension, move the player accordingly
-    // avoid messing up position for different dimensions
+    // 若待确认位置属于其它维度，则将玩家同步到该维度。
+    // 避免不同维度的坐标互相覆盖。
+    /** 传送回执指向其它维度时，将玩家同步到已确认的位置。 */
     @Inject(
         method = "handleAcceptTeleportPacket",
         at = @At(
@@ -232,6 +223,7 @@ public abstract class MixinServerGamePacketListenerImpl {
         }
     }
     
+    /** 原版纠偏位置改变时同步保存其所属维度。 */
     @Inject(
         method = "handlePlayerCommand",
         at = @At(

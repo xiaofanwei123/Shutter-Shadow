@@ -1,10 +1,12 @@
 package com.xfw.shuttershadow.core.chunk_loading;
-// Shuttershadow phase seven: relocated into the camera core.
 
 
+
+/** good/medium/bad客户端性能档位，只影响目标渲染有效距离，不改变服务端配置。 */
 public enum PerformanceLevel {
     good, medium, bad;
     
+    /** 平均FPS>50且剩余内存>800MB为good，>30且>300MB为medium，其他为bad。 */
     public static PerformanceLevel getClientPerformanceLevel(
         int averageFPS,
         int averageFreeMemoryMB
@@ -21,6 +23,7 @@ public enum PerformanceLevel {
     }
     
     
+    /** good保留原距离，medium减半且至少2，bad固定2。 */
     public static int getCameraRenderDistance(
         PerformanceLevel level, int originalDistance
     ) {

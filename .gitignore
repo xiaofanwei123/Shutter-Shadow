@@ -35,7 +35,10 @@ __pycache__/
 *.py[cod]
 /.venv/
 /.pytest_cache/
-tools
+
+# 仅本地保留的维护工具和代码文档
+/tools/
+/wiki/[Cc][Oo][Dd][Ee].md
 
 # 操作系统和编辑器临时文件
 .DS_Store

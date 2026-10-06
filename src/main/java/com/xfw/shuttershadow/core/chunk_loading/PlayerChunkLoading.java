@@ -1,6 +1,6 @@
 package com.xfw.shuttershadow.core.chunk_loading;
 import com.xfw.shuttershadow.api.ChunkLoader;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.mojang.logging.LogUtils;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -32,23 +32,16 @@ import com.xfw.shuttershadow.util.Helper;
 import java.util.ArrayList;
 import java.util.Set;
 
-/**
- * Per-player chunk-loading related info.
- * Also do chunk packet sending throttling {@link PlayerChunkSender}
- */
+/** 保存各玩家的额外区块加载器、可见维度和远程区块发送队列。 */
 @SuppressWarnings({"JavadocReference", "UnstableApiUsage"})
 public class PlayerChunkLoading {
     
     private static final Logger LOGGER = LogUtils.getLogger();
     
-    /**
-     * Gets cleared in {@link RemoteChunkTracking#updateForPlayer(ServerPlayer)} and re-calculated
-     */
+    /** 每次更新玩家加载信息时清空并重新计算可见维度。 */
     public final Set<ResourceKey<Level>> visibleDimensions = new ObjectOpenHashSet<>();
     
-    /**
-     * Per-player chunk loaders. Added and removed via the API.
-     */
+    /** 每位玩家的额外区块加载器，通过公开接口添加和移除。 */
     public final ArrayList<ChunkLoader> additionalChunkLoaders = new ArrayList<>();
     
     public final ArrayList<ObjectArrayList<RemoteChunkTracking.PlayerWatchRecord>> distanceToPendingChunks =
@@ -56,28 +49,24 @@ public class PlayerChunkLoading {
     
     public int loadedChunks = 0;
     
-    // normally chunk loading will update following to an interval
-    // but if this is true, it will immediately update next tick
+    // 区块加载通常按固定间隔更新。
+    // 此标志为真时，在下一游戏刻立即更新。
     public boolean shouldUpdateImmediately = false;
     
     
-    /**
-     * Do similar functionality as {@link PlayerChunkSender},
-     * but for multi-dim and non-near-loading-only
-     */
+    /** 记录连接类型，为跨维度区块发送选择批次配额。 */
     public final boolean isMemoryConnection;
     private float desiredChunksPerTick = 9.0F;
     private float batchQuota;
     private int unacknowledgedBatches;
     private int maxUnacknowledgedBatches = 1;
     
+    /** 保存是否为内存连接，单人内存连接使用更高发送配额。 */
     public PlayerChunkLoading(boolean isMemoryConnection) {
         this.isMemoryConnection = isMemoryConnection;
     }
     
-    /**
-     * one chunk may mark pending loading multiple times with different distanceToSource
-     */
+    /** 按来源距离将观察记录加入待发送队列。 */
     public void markPendingLoading(RemoteChunkTracking.PlayerWatchRecord record) {
         Helper.arrayListComputeIfAbsent(
             distanceToPendingChunks,
@@ -86,9 +75,7 @@ public class PlayerChunkLoading {
         ).add(record);
     }
     
-    /**
-     * {@link PlayerChunkSender#sendNextChunks(ServerPlayer)}
-     */
+    /** 按批次配额发送已就绪的远程区块，并等待客户端确认。 */
     @VanillaRuntimeHooks
     public void doChunkSending(ServerPlayer serverPlayer) {
         if (this.unacknowledgedBatches >= this.maxUnacknowledgedBatches) {
@@ -126,12 +113,12 @@ public class PlayerChunkLoading {
             }
             
             Helper.removeIfWithEarlyExit(recs, (record, shouldStop) -> {
-                // chunk unloaded, remove
+                // 区块已卸载，移除待发送记录。
                 if (!record.isValid) {
                     return true;
                 }
                 
-                // already loaded to player, remove
+                // 玩家已收到区块，移除待发送记录。
                 if (record.isLoadedToPlayer) {
                     return true;
                 }
@@ -149,12 +136,12 @@ public class PlayerChunkLoading {
                 ChunkHolder chunkHolder = ((IEChunkMap) chunkMap).ip_getChunkHolder(record.chunkPos);
                 
                 if (chunkHolder == null) {
-                    return false; // skip
+                    return false; // 暂时跳过该区块。
                 }
                 
                 LevelChunk tickingChunk = chunkHolder.getChunkToSend();
                 
-                // skip that chunk if not yet loaded
+                // 尚未加载的区块留待后续发送。
                 if (tickingChunk == null) {
                     return false;
                 }
@@ -184,7 +171,7 @@ public class PlayerChunkLoading {
                     shouldStop.setValue(true);
                 }
                 
-                return true; // remove from list
+                return true; // 从待发送列表移除。
             });
         }
         
@@ -196,9 +183,7 @@ public class PlayerChunkLoading {
         this.batchQuota -= (float) sentNum.getValue();
     }
     
-    /**
-     * {@link PlayerChunkSender#sendChunk(ServerGamePacketListenerImpl, ServerLevel, LevelChunk)}
-     */
+    /** 向目标维度发送区块及光照数据，并发布区块发送事件。 */
     @VanillaRuntimeHooks
     private static void sendChunkPacket(
         ServerGamePacketListenerImpl serverGamePacketListenerImpl,
@@ -219,9 +204,7 @@ public class PlayerChunkLoading {
         EventHooks.fireChunkSent(serverGamePacketListenerImpl.getPlayer(), levelChunk, serverLevel);
     }
     
-    /**
-     * {@link PlayerChunkSender#onChunkBatchReceivedByClient(float)}
-     */
+    /** 接收远程区块批次确认，并更新客户端允许的发送速度。 */
     @VanillaRuntimeHooks
     public void onChunkBatchReceivedByClient(float clientDesiredChunkPerTick) {
         if (this.unacknowledgedBatches == 0) return;

@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -28,6 +28,7 @@ import com.xfw.shuttershadow.core.teleportation.ClientTeleportationManager;
 import com.xfw.shuttershadow.util.Helper;
 import com.xfw.shuttershadow.util.CountDownInt;
 
+/** 处理多世界位置、载具、实体、时钟和方块预测同步。 */
 @Mixin(ClientPacketListener.class)
 public abstract class MixinClientPacketListener implements IEClientPlayNetworkHandler {
     private static CountDownInt LOG_LIMIT = new CountDownInt(20);
@@ -35,6 +36,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
     @Shadow
     private ClientLevel level;
     
+    /** Shadow 引用原乘客包处理方法，允许延迟任务再执行相同包。 */
     @Shadow
     public abstract void handleSetEntityPassengersPacket(ClientboundSetPassengersPacket entityPassengersSetS2CPacket_1);
     
@@ -42,11 +44,13 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
     @Final
     private static Logger LOGGER;
     
+    /** 替换监听器 level 引用，重定向包/无缝换维时使原版 handler 在正确 ClientLevel 上运行。 */
     @Override
     public void ip_setWorld(ClientLevel world) {
         this.level = world;
     }
     
+    /** 位置包指定其它维度时先无缝切换世界，再由原版更新位置。 */
     @Inject(
         method = "Lnet/minecraft/client/multiplayer/ClientPacketListener;handleMovePlayer(Lnet/minecraft/network/protocol/game/ClientboundPlayerPositionPacket;)V",
         at = @At(
@@ -81,7 +85,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
                 new Vec3(packet.getX(), packet.getY(), packet.getZ())
             );
 
-//            ClientTeleportationManager.disableTeleportFor(2);
+// 曾在此处短暂禁用客户端传送。
         }
         
         LOGGER.info(
@@ -92,6 +96,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
     
     private boolean isReProcessingPassengerPacket;
     
+    /** 载具实体尚未到达时，将乘客同步包延后重试一次。 */
     @Inject(
         method = "Lnet/minecraft/client/multiplayer/ClientPacketListener;handleSetEntityPassengersPacket(Lnet/minecraft/network/protocol/game/ClientboundSetPassengersPacket;)V",
         at = @At(
@@ -120,7 +125,8 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         }
     }
     
-    // for debug
+    // 用于调试。
+    /** 重定向 handleSetEntityData 的实体查找，只在当前处理世界取 ID。 */
     @Redirect(
         method = "Lnet/minecraft/client/multiplayer/ClientPacketListener;handleSetEntityData(Lnet/minecraft/network/protocol/game/ClientboundSetEntityDataPacket;)V",
         at = @At(
@@ -138,7 +144,8 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         return entity;
     }
     
-    // make sure that the game time is synchronized for all dimensions
+    // 将各客户端维度的游戏时间保持同步。
+    /** handleSetTime 返回后，把服务端 gameTime 写到其他已加载 ClientLevel。 */
     @Inject(
         method = "handleSetTime",
         at = @At("RETURN")
@@ -154,17 +161,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         }
     }
     
-    /**
-     * Vanilla has a block change acknowledge system.
-     * All player actions that involve block change has a sequence number.
-     * The server will send acknowledge packet to client every tick to tell that the server acknowledged the action.
-     * In the client, each dimension has a {@link BlockStatePredictionHandler}.
-     * When the player is performing action, it will start prediction and all client-side block changes will be enqueued with sequence number.
-     * When the server send acknowledge packet, the client will apply and dequeue the block changes with sequence number smaller or equal than the acknowledgement sequence number.
-     * When the server sends block update, the block state in the queue of block changes will get updated.
-     * As ImmPtl has cross-dimensional block interaction, it needs to acknowledge all worlds.
-     * In {@link MixinBlockStatePredictionHandler} the sequence number is kept sync across dimensions.
-     */
+    /** 向所有客户端世界同步方块操作确认序号。 */
     @Redirect(
         method = "handleBlockChangedAck",
         at = @At(
@@ -178,6 +175,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         }
     }
     
+    /** 保留已有乘客的实体，避免重复生成包替换无缝传送的载具。 */
     @Inject(
         method = "handleAddEntity",
         at = @At(
@@ -198,7 +196,8 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         }
     }
     
-    // for debugging
+    // 用于调试。
+    /** 启用区块包调试时记录加载维度和区块坐标。 */
     @Inject(
         method = "handleLevelChunkWithLight",
         at = @At(
@@ -215,7 +214,8 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         }
     }
     
-    // for debugging
+    // 用于调试。
+    /** 启用区块包调试时记录卸载维度和区块坐标。 */
     @Inject(
         method = "handleForgetLevelChunk",
         at = @At(

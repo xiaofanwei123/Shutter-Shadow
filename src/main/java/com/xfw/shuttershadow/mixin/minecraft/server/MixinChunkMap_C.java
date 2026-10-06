@@ -33,19 +33,19 @@ import java.util.List;
 import java.util.Queue;
 import java.util.function.BooleanSupplier;
 
+/** 衔接原版及相机订阅，保护无缝实体交接并限制关服卸载循环。 */
 @Mixin(ChunkMap.class)
 public abstract class MixinChunkMap_C implements IEChunkMap {
     @Shadow @Final private ServerLevel level;
+    /** 读取已存在的可见区块持有者，不主动生成区块。 */
     @Shadow protected abstract ChunkHolder getVisibleChunkIfPresent(long position);
     @Shadow @Final public Int2ObjectMap<TrackedEntity> entityMap;
     @Shadow @Final private Queue<Runnable> unloadQueue;
+    /** Shadow 引用原 updatePlayerStatus，玩家无缝从旧维度移除时仍需正确清掉原版玩家票据状态。 */
     @Shadow abstract void updatePlayerStatus(ServerPlayer player, boolean added);
     @Unique private int shuttershadow$shutdownUnloadBudget = -1;
 
-    /**
-     * 仅关服时限制本轮卸载次数；重排任务保留到下一轮，让生成任务释放引用后正常保存。
-     * 运行中的保存或暂停不进入此分支。
-     */
+    /** 包裹 processUnloads：服务器运行时预算为 -1，不限原流程。 */
     @WrapMethod(method = "processUnloads")
     private void shuttershadow$yieldShutdownUnloads(BooleanSupplier hasTime, Operation<Void> original) {
         int previous = shuttershadow$shutdownUnloadBudget;
@@ -57,6 +57,7 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
         }
     }
 
+    /** 包裹 processUnloads 内 Queue.poll：预算 0 返回 null 结束本轮。 */
     @WrapOperation(method = "processUnloads", at = @At(value = "INVOKE",
             target = "Ljava/util/Queue;poll()Ljava/lang/Object;", remap = false))
     private Object shuttershadow$pollShutdownUnload(Queue<Runnable> queue, Operation<Object> original) {
@@ -65,22 +66,25 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
         return original.call(queue);
     }
 
+    /** 返回 ChunkMap.level，区块票据/广播路由取得实际世界。 */
     @Override
     public ServerLevel ip_getWorld() {
         return level;
     }
 
+    /** 按 long 区块坐标调用原可见 holder 查找，用于服务端就绪检查，不强制加载。 */
     @Override
     public ChunkHolder ip_getChunkHolder(long position) {
         return getVisibleChunkIfPresent(position);
     }
 
+    /** 原版追踪视野改变后重新计算相机额外订阅。 */
     @Inject(method = "applyChunkTrackingView", at = @At("RETURN"))
     private void shuttershadow$refreshExtraRange(ServerPlayer player, ChunkTrackingView view, CallbackInfo ci) {
         if (player.level() == level) RemoteChunkTracking.onNativeViewChanged(player);
     }
 
-    /** 原版名单不变，仅为相机额外订阅补上方块、光照等更新接收者。 */
+    /** 将相机额外观察者加入区块更新接收者，并去重。 */
     @Inject(method = "getPlayers", at = @At("RETURN"), cancellable = true)
     private void shuttershadow$includeCameraWatchers(ChunkPos pos, boolean boundaryOnly,
             CallbackInfoReturnable<List<ServerPlayer>> cir) {
@@ -93,12 +97,13 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
         cir.setReturnValue(result);
     }
 
-    /** 生物群系重发也会包含相机订阅者，发送期间明确标注所属维度。 */
+    /** 为生物群系重发包指定所属维度，完成后恢复发送上下文。 */
     @WrapMethod(method = "resendBiomesForChunks")
     private void shuttershadow$routeBiomeUpdates(List<ChunkAccess> chunks, Operation<Void> original) {
         PacketRedirection.withForceRedirect(level, () -> original.call(chunks));
     }
 
+    /** 接管正在无缝交接的实体移除，保留跨维度迁移状态。 */
     @VanillaRuntimeHooks
     @Inject(
         method = "Lnet/minecraft/server/level/ChunkMap;removeEntity(Lnet/minecraft/world/entity/Entity;)V",
@@ -106,7 +111,7 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
         cancellable = true
     )
     private void onUnloadEntity(Entity entity, CallbackInfo ci) {
-        // when the player leave this dimension, do not stop tracking entities
+        // 玩家离开本维度后，按相机订阅继续跟踪远景实体。
         if (ServerTeleportationManager.of(entity.getServer()).isTeleporting(entity)) {
             if (entity instanceof ServerPlayer player) {
                 Object tracker = entityMap.remove(entity.getId());
@@ -126,6 +131,7 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
         }
     }
 
+    /** 退出或重生时清理旧玩家实例的实体配对。 */
     @Override
     public void ip_onPlayerUnload(ServerPlayer oldPlayer) {
         entityMap.values().forEach(obj -> {
@@ -133,6 +139,7 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
         });
     }
 
+    /** 返回 entityMap 实际追踪器表，供多人载具移交和跨维观察者同步，不复制表。 */
     @Override
     public Int2ObjectMap<TrackedEntity> ip_getEntityTrackerMap() {
         return entityMap;

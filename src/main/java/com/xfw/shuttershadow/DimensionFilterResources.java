@@ -14,15 +14,16 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** 新目录只映射到 Exposure 原有滤镜注册表，不另建路由或同步系统。 */
+/** 把data/shuttershadow/dimensio_filter/<维度命名空间>/<维度路径>.json映射到Exposure读取的虚拟滤镜路径。 */
 public final class DimensionFilterResources {
     private static final FileToIdConverter DIMENSION_FILES = FileToIdConverter.json("dimension_filter");
     private static final FileToIdConverter EXPOSURE_FILES =
             FileToIdConverter.json(Registries.elementsDirPath(Exposure.Registries.FILTER));
 
+    /** 禁止实例化此工具类。 */
     private DimensionFilterResources() {}
 
-    /** 合并标准 Exposure 文件和新目录，保留数据包堆叠顺序；同优先级时新目录优先。 */
+    /** 扫描本模组命名空间的新路径，验证维度路径，把资源转换为Exposure虚拟文件键，并用包优先级解决同名覆盖。 */
     public static Map<ResourceLocation, Resource> merge(ResourceManager manager,
                                                        Map<ResourceLocation, Resource> exposureFiles) {
         Map<ResourceLocation, Resource> dimensionFiles = DIMENSION_FILES.listMatchingResourcesFromNamespace(
@@ -47,7 +48,7 @@ public final class DimensionFilterResources {
         return merged;
     }
 
-    /** known-pack 客户端本地读取时复用相同路径和堆叠规则。 */
+    /** 针对从网络收到的Exposure虚拟路径寻找真实资源。 */
     public static @Nullable Resource fromNetwork(ResourceProvider provider, ResourceLocation virtualFile) {
         if (!virtualFile.getNamespace().equals(Shuttershadow.MODID)
                 || !virtualFile.getPath().startsWith("exposure/filter/")
@@ -63,6 +64,7 @@ public final class DimensionFilterResources {
                 .orElse(null);
     }
 
+    /** 验证路径能拆成非空维度命名空间和维度路径，且构成合法ResourceLocation。 */
     private static boolean hasDimensionPath(ResourceLocation id) {
         int separator = id.getPath().indexOf('/');
         return separator > 0 && separator < id.getPath().length() - 1

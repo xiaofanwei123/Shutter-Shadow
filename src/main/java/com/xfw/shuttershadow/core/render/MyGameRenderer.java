@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.render;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -35,21 +35,23 @@ import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
 import java.util.Stack;
 
-//@OnlyIn(Dist.CLIENT)
+// 仅供客户端使用。
 // Shuttershadow 第六轮：保留相机多世界渲染及恢复，撤销门户遮挡和准星分支。
+/** 目标世界渲染的状态保存/恢复中心。 */
 public class MyGameRenderer {
     public static final Minecraft client = Minecraft.getInstance();
     
-//    public static final int MAX_SECONDARY_BUFFER_NUM = 2;
+// 已停用的次级缓冲数量上限。
     
-    // portal rendering and outer world rendering uses different buffer builder storages
+    // 远程维度与玩家世界使用独立的渲染缓冲存储。
     private static Stack<RenderBuffers> secondaryRenderBuffers = new Stack<>();
     
-    // the vanilla visibility sections discovery code is multithreaded
-    // when the player teleports through a portal, on the first frame it will not work normally
-    // so use IP's non-multi-threaded algorithm at the first frame
+    // 原版可见区段发现采用多线程，
+    // 跨维度传送后的第一帧可能无法及时得到正确结果，
+    // 因此首帧使用内核的同步可见区段算法。
     public static int vanillaTerrainSetupOverride = 0;
     
+    /** 从缓存池取得或创建临时渲染缓冲。 */
     private static RenderBuffers acquireRenderBuffersObject() {
         if (secondaryRenderBuffers.isEmpty()) {
             return new RenderBuffers(0);
@@ -59,10 +61,12 @@ public class MyGameRenderer {
         }
     }
     
+    /** 将使用完的渲染缓冲放回缓存池。 */
     private static void returnRenderBuffersObject(RenderBuffers renderBuffers) {
         secondaryRenderBuffers.push(renderBuffers);
     }
     
+    /** 登记目标渲染任务，完成绘制后恢复渲染任务堆栈。 */
     public static void renderWorldNew(WorldRenderInfo worldRenderInfo) {
         WorldRenderInfo.pushRenderInfo(worldRenderInfo);
         try {
@@ -75,6 +79,7 @@ public class MyGameRenderer {
         }
     }
     
+    /** 暂存原世界渲染状态，切换目标世界完成绘制后恢复。 */
     private static void switchAndRenderTheWorld(
         ClientLevel newWorld,
         int renderDistance
@@ -90,7 +95,7 @@ public class MyGameRenderer {
             ClientWorldLoader.getDimensionRenderHelper(newDimension);
         Camera newCamera = new Camera();
         
-        // store old state
+        // 保存当前世界的渲染状态。
         ClientLevel oldWorld = client.level;
         LevelRenderer oldWorldRenderer = client.levelRenderer;
         LightTexture oldLightmap = client.gameRenderer.lightTexture();
@@ -108,8 +113,8 @@ public class MyGameRenderer {
                 .ip_getFixedBuffers();
         Frustum oldFrustum = ((IEWorldRenderer) worldRenderer).portal_getFrustum();
         
-        // the projection matrix contains view bobbing.
-        // the view bobbing is related with scale
+        // 投影矩阵包含视角摇晃，
+        // 摇晃效果会受到视图缩放的影响。
         Matrix4f oldProjectionMatrix = RenderSystem.getProjectionMatrix();
         Matrix4fStack oldModelViewStack = IERenderSystem.ip_getModelViewStack();
         
@@ -125,7 +130,7 @@ public class MyGameRenderer {
         try {
             ((IEWorldRenderer) oldWorldRenderer).portal_setChunkInfoList(newChunkInfoList);
 
-            // switch (note: it will no longer switch the world that client player is in )
+            // 切换渲染上下文，同时保留客户端玩家所在的世界。
             ((IEMinecraftClient) client).ip_setWorldRenderer(worldRenderer);
             client.level = newWorld;
             ieGameRenderer.ip_setLightmapTextureManager(helper.lightmapTexture);
@@ -143,12 +148,7 @@ public class MyGameRenderer {
             ((IEWorldRenderer) worldRenderer).ip_setRenderBuffers(newRenderBuffers);
             ((IEMinecraftClient) client).ip_setRenderBuffers(newRenderBuffers);
 
-            /*
-              the vanilla buffer pack may be used by {@link net.minecraft.client.renderer.MultiBufferSource.BufferSource}
-              The BufferSource does not always immediately finish building.
-              Reusing that may cause "Already Building" error in Buffer Builder when doing main-thread chunk rebuilding.
-              This does not occur in vanilla because vanilla does main-thread chunk rebuilding before entity rendering. With portal rendering it could do chunk rebuilding after some entity rendering.
-             */
+            /* 原版实体缓冲可能尚未结束构建；远景若复用此缓冲并在实体渲染后重建区块，会触发重复构建错误。 */
             ((IESectionRenderDispatcher) worldRenderer.getSectionRenderDispatcher())
                 .ip_setFixedBuffers(newRenderBuffers.fixedBufferPack());
 
@@ -163,12 +163,12 @@ public class MyGameRenderer {
 
             IrisInterface.invoker.setPipeline(worldRenderer, null);
 
-            //update lightmap
+            // 更新目标世界的光照纹理。
             if (!RenderStates.isDimensionRendered(newDimension)) {
                 helper.lightmapTexture.updateLightTexture(0);
             }
 
-            //invoke rendering
+            // 执行目标世界渲染。
             client.getProfiler().push("render_portal_content");
             try {
                 client.gameRenderer.renderLevel(client.getTimer());
@@ -183,7 +183,7 @@ public class MyGameRenderer {
                 }
             } finally {
 
-                //recover
+                // 恢复玩家世界的渲染状态。
 
                 ((IEMinecraftClient) client).ip_setWorldRenderer(oldWorldRenderer);
                 client.level = oldWorld;

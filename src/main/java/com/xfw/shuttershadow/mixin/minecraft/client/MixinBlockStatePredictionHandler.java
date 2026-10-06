@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
@@ -11,15 +11,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.access.IEClientWorld;
 
+/** 在各客户端世界之间同步方块操作预测序号。 */
 @Mixin(BlockStatePredictionHandler.class)
 public class MixinBlockStatePredictionHandler {
     @Shadow
     private int currentSequenceNr;
     
-    /**
-     * Each dimension has its own BlockStatePredictionHandler, because its internal map does not discriminate dimensions.
-     * So all the handlers should have synchronized sequence number.
-     */
+    /** 将新产生的方块操作预测序号同步到所有客户端世界。 */
     @Inject(
         method = "startPredicting",
         at = @At("RETURN")

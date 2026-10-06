@@ -7,14 +7,10 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-/**
- * Defers the second camera reset inside Exposure's stand entity itself.
- * ClientPacketsHandler.stopControllingCameraStand() calls
- * CameraStandEntity.stopControlling(), which has its own reset call in
- * addition to the packet handler call redirected by the companion mixin.
- */
+/** 延迟支架实体的相机复位，避免换维后锁在旧支架视角。 */
 @Mixin(value = CameraStandEntity.class, remap = false)
 public abstract class ExposureCameraStandStopControllingMixin {
+    /** 将支架实体的相机复位延迟到安全的客户端刻。 */
     @Redirect(method = "stopControlling", at = @At(value = "INVOKE",
             target = "Lio/github/mortuusars/exposure/client/camera/CameraClient;resetCameraEntity()V"))
     private void shuttershadow$deferStandReset() {

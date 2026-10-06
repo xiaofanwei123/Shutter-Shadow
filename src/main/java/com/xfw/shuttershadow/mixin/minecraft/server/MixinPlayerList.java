@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.Connection;
@@ -27,6 +27,7 @@ import com.xfw.shuttershadow.util.Helper;
 import java.util.List;
 import java.util.Set;
 
+/** 同步玩家登录和重生状态，并向相机观察者补发维度广播。 */
 @Mixin(value = PlayerList.class, priority = 800)
 public class MixinPlayerList {
     @Shadow
@@ -37,6 +38,7 @@ public class MixinPlayerList {
     @Final
     private MinecraftServer server;
     
+    /** placeNewPlayer 尾部立即刷新额外追踪并记录登录，保证登录状态/额外订阅一致。 */
     @Inject(method = "placeNewPlayer", at = @At("TAIL"))
     private void onOnPlayerConnect(
         Connection connection, ServerPlayer player,
@@ -44,11 +46,11 @@ public class MixinPlayerList {
     ) {
         RemoteChunkTracking.immediatelyUpdateForPlayer(player);
         
-        // debug
+        // 用于调试。
         Helper.LOGGER.info("Player login {} {}", player.level().getGameTime(), player);
     }
     
-    /** 普通本维度广播由原版发送，额外只通知正在观察该维度的相机。 */
+    /** 向正在异维度观察目标世界的玩家补发维度广播包。 */
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Inject(method = "broadcastAll(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/resources/ResourceKey;)V",
             at = @At("TAIL"))
@@ -61,11 +63,7 @@ public class MixinPlayerList {
         }
     }
 
-    /**
-     * correct the player reference, so that in
-     * {@link com.xfw.shuttershadow.mixin.minecraft.server.MixinServerGamePacketListenerImpl#teleport(double, double, double, float, float, Set)}
-     * the player's dimension will be correct
-     */
+    /** 重生复制状态后更新连接中的玩家引用。 */
     @Redirect(
         method = "respawn",
         at = @At(
@@ -79,7 +77,7 @@ public class MixinPlayerList {
         newPlayer.connection.player = newPlayer;
     }
     
-    /** 位置音效与粒子仅为相机追加异维度接收者，不接管原版广播。 */
+    /** 位置广播尾部按消息位置区块取观察记录，排除指定玩家和同维度原生接收者，对范围内有效额外观察者发重定向包。 */
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Inject(method = "broadcast(Lnet/minecraft/world/entity/player/Player;DDDDLnet/minecraft/resources/ResourceKey;Lnet/minecraft/network/protocol/Packet;)V",
             at = @At("TAIL"))

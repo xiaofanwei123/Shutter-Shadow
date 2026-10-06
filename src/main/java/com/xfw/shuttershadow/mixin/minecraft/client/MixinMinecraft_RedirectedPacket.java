@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceKey;
@@ -13,14 +13,17 @@ import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
 import com.xfw.shuttershadow.network.PacketRedirectionClient;
 
+/** 让重定向数据包的客户端任务在正确维度上下文执行。 */
 @Mixin(Minecraft.class)
 public abstract class MixinMinecraft_RedirectedPacket extends ReentrantBlockableEventLoop<Runnable> {
     
+    /** Mixin 继承 BlockableEventLoop 所需构造器，转发名称参数给父类。 */
     public MixinMinecraft_RedirectedPacket(String string) {
         super(string);
     }
     
-    // ensure that the task is processed with the redirected dimension
+    // 确保任务在重定向指定的维度中处理。
+    /** 包装重定向包任务，使其在指定维度中执行并恢复上下文。 */
     @Inject(
         method = "Lnet/minecraft/client/Minecraft;wrapRunnable(Ljava/lang/Runnable;)Ljava/lang/Runnable;",
         at = @At("HEAD"),
@@ -38,13 +41,7 @@ public abstract class MixinMinecraft_RedirectedPacket extends ReentrantBlockable
         }
     }
     
-    /**
-     * Make sure that the redirected packet handling won't be delayed.
-     * If not on thread, it will delay handling.
-     * If running task, it will delay handling.
-     * If on thread and running task, normally it will delay handling, but this override
-     *  makes it to not delay when processing redirected packet.
-     */
+    /** 覆写任务是否排队：当前游戏线程正在处理重定向消息时返回 false 使包及时在维度作用域执行。 */
     @VanillaRuntimeHooks
     @Override
     public boolean scheduleExecutables() {

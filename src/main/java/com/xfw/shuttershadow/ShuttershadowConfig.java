@@ -2,7 +2,7 @@ package com.xfw.shuttershadow;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
 
-/** 手动和红石支架共用的范围与个人传送偏好。 */
+/** NeoForge SERVER配置控制目标取景上限、支架玩家范围及生物范围。 */
 public final class ShuttershadowConfig {
     public static final ModConfigSpec SERVER_SPEC;
     public static final ModConfigSpec CLIENT_SPEC;
@@ -51,21 +51,26 @@ public final class ShuttershadowConfig {
         CLIENT_SPEC = clientBuilder.build();
     }
 
+    /** 禁止实例化此工具类。 */
     private ShuttershadowConfig() {
     }
 
+    /** 读取服务端支架玩家捕获半径（方块）。 */
     public static int standPlayerRadius() {
         return STAND_PLAYER_RADIUS.get();
     }
 
+    /** 读取服务端最大远维度取景半径（区块）。 */
     public static int maxRemoteViewDistance() {
         return MAX_REMOTE_VIEW_DISTANCE.get();
     }
 
+    /** 读取客户端是否接受支架玩家胶卷传送。 */
     public static boolean acceptStandDimensionFilmTeleport() {
         return ACCEPT_STAND_DIMENSION_FILM_TELEPORT.get();
     }
 
+    /** 读取服务端生物捕获搜索盒半径（方块）。 */
     public static int mobCaptureRadius() {
         return MOB_CAPTURE_RADIUS.get();
     }

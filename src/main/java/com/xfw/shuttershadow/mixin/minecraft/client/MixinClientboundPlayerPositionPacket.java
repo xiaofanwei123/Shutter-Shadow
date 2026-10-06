@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
@@ -13,8 +13,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.xfw.shuttershadow.access.IEPlayerPositionLookS2CPacket;
 import com.xfw.shuttershadow.network.CoreNetworkHandshake;
 
+/** 在服务器支持内核协议时读取位置包的扩展维度字段。 */
 @Mixin(ClientboundPlayerPositionPacket.class)
 public class MixinClientboundPlayerPositionPacket {
+    /** 读取扩展位置包的目标维度，仅对支持内核协议的服务器启用。 */
     @Inject(method = "<init>(Lnet/minecraft/network/FriendlyByteBuf;)V", at = @At("RETURN"))
     private void onRead(FriendlyByteBuf buf, CallbackInfo ci) {
         if (CoreNetworkHandshake.doesServerHaveDimensionRuntime()) {

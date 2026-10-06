@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -27,6 +27,7 @@ import com.xfw.shuttershadow.core.chunk_loading.RemoteClientChunkMap;
 
 import java.util.function.Supplier;
 
+/** 管理客户端远程区块缓存、实体去重及世界状态访问。 */
 @Mixin(ClientLevel.class)
 public abstract class MixinClientLevel implements IEClientWorld {
     
@@ -49,7 +50,8 @@ public abstract class MixinClientLevel implements IEClientWorld {
     @Mutable
     private TickRateManager tickRateManager;
     
-    //use my client chunk manager
+    // 使用相机内核的客户端区块缓存。
+    /** 替换客户端区块缓存，使世界能够接收相机额外订阅的区块。 */
     @Inject(
         method = "<init>",
         at = @At("RETURN")
@@ -63,7 +65,8 @@ public abstract class MixinClientLevel implements IEClientWorld {
         chunkSource = new RemoteClientChunkMap(clientWorld);
     }
     
-    // avoid entity duplicate when an entity travels
+    // 实体换维时避免重复保留同一实体。
+    /** addEntity 完成后，在已初始化的其余客户端世界删除同数字 ID 实体，避免无缝移交后同实体留在多个维度。 */
     @Inject(
         method = "addEntity",
         at = @At("TAIL")
@@ -78,11 +81,7 @@ public abstract class MixinClientLevel implements IEClientWorld {
         }
     }
     
-    /**
-     * If the player goes into a portal when the other side chunk is not yet loaded
-     * freeze the player so the player won't drop
-     * {@link net.minecraft.client.player.LocalPlayer#tick()}
-     */
+    /** hasChunk 开头查真实 FULL 区块而不创建。 */
     @Inject(
         method = "Lnet/minecraft/client/multiplayer/ClientLevel;hasChunk(II)Z",
         at = @At("HEAD"),
@@ -95,23 +94,27 @@ public abstract class MixinClientLevel implements IEClientWorld {
         }
     }
     
-    // for debug
+    // 用于调试。
+    /** toString 直接显示 ClientWorld 和维度 ID，帮助路由诊断。 */
     @Inject(method = "Lnet/minecraft/client/multiplayer/ClientLevel;toString()Ljava/lang/String;", at = @At("HEAD"), cancellable = true)
     private void onToString(CallbackInfoReturnable<String> cir) {
         ClientLevel this_ = (ClientLevel) (Object) this;
         cir.setReturnValue("ClientWorld " + this_.dimension().location());
     }
     
+    /** 将 levelRenderer 引用置空，远世界完整销毁时断开其渲染器引用。 */
     @Override
     public void ip_resetWorldRendererRef() {
         levelRenderer = null;
     }
     
+    /** 返回当前世界 BlockStatePredictionHandler，供预测序号/回执在所有世界同步。 */
     @Override
     public BlockStatePredictionHandler ip_getBlockStatePredictionHandler() {
         return blockStatePredictionHandler;
     }
     
+    /** 替换 tickRateManager，让远世界与当前世界使用同一 tick 速度管理状态。 */
     @Override
     public void ip_setTickRateManager(TickRateManager cond) {
         tickRateManager = cond;

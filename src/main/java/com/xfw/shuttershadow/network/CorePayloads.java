@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.network;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -9,12 +9,14 @@ import com.xfw.shuttershadow.network.CoreNetworkHandshake;
 import com.xfw.shuttershadow.network.PacketRedirection;
 
 // 共用维度配置、维度类型同步、相机区块回执与远程世界包路由注册。
+/** 内核数据包注册入口，使用与相机包同一PayloadRegistrar版本。 */
 public class CorePayloads {
+    /** 将五类内核payload的codec及对应处理器注册到CONFIGURATION/PLAY及正确传输方向。 */
     @SubscribeEvent
     public static void register(final RegisterPayloadHandlersEvent event) {
         final PayloadRegistrar registrar = event.registrar(ShuttershadowNetwork.PROTOCOL_VERSION);
 
-        // Configuration
+        // 连接配置阶段的数据包。
         registrar.configurationToClient(CoreNetworkHandshake.S2CConfigStartPacket.TYPE,
                 CoreNetworkHandshake.S2CConfigStartPacket.CODEC,
                 CoreNetworkHandshake.S2CConfigStartPacket::handle);
@@ -23,7 +25,7 @@ public class CorePayloads {
                 CoreNetworkHandshake.C2SConfigCompletePacket.CODEC,
                 CoreNetworkHandshake.C2SConfigCompletePacket::handle);
 
-        // Play
+        // 游戏阶段的数据包。
         registrar.playToClient(PacketRedirection.Payload.TYPE, PacketRedirection.Payload.CODEC, (p, c) -> p.handle((ClientGamePacketListener) c.listener()));
         registrar.playToClient(MiscNetworking.DimIdSyncPacket.TYPE, MiscNetworking.DimIdSyncPacket.CODEC,
                 (payload, context) -> payload.handleOnNetworkingThread());

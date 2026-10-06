@@ -12,12 +12,13 @@ import org.spongepowered.asm.mixin.Shadow;
 import java.util.Map;
 import java.util.Set;
 
-/** 仅管理本模组仍在准备或被取消的照片授权，不改变 Exposure 其它照片的超时规则。 */
+/** 提供延长照片上传授权和清理旧授权的事务接口。 */
 @Mixin(value = ExposureRepository.class, remap = false)
 public abstract class ExposureRepositoryRemoteMixin implements RemoteStandPreparation.UploadWindow {
     @Shadow @Final
     protected Map<ServerPlayer, Set<ExpectedExposure>> expectedExposures;
 
+    /** 刷新指定照片的上传等待期限，并保留原完成回调。 */
     @Override
     public void shuttershadow$refreshExpected(ServerPlayer player, String id) {
         Set<ExpectedExposure> entries = expectedExposures.get(player);
@@ -31,6 +32,7 @@ public abstract class ExposureRepositoryRemoteMixin implements RemoteStandPrepar
                 ExposureRepository.EXPECTED_TIMEOUT_SECONDS), previous.onReceived()));
     }
 
+    /** 删除该玩家指定曝光 ID 的授权，列表空时移除玩家键。 */
     @Override
     public void shuttershadow$cancelExpected(ServerPlayer player, String exposureId) {
         Set<ExpectedExposure> entries = expectedExposures.get(player);

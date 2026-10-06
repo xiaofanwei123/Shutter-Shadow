@@ -17,9 +17,10 @@ import org.spongepowered.asm.mixin.injection.At;
 
 import java.util.Map;
 
-/** 仅扩展 Exposure 滤镜注册表的文件读取目录；解码和同步仍走原生流程。 */
+/** 让 Exposure 维度滤镜注册表读取本模组的数据包目录。 */
 @Mixin(RegistryDataLoader.class)
 public abstract class DimensionFilterDataMixin {
+    /** 将维度滤镜新目录合入文件枚举，并保留数据包优先级。 */
     @WrapOperation(method = "loadContentsFromManager", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/resources/FileToIdConverter;listMatchingResources(Lnet/minecraft/server/packs/resources/ResourceManager;)Ljava/util/Map;"))
     private static Map<ResourceLocation, Resource> shuttershadow$dimensionFiles(
@@ -31,6 +32,7 @@ public abstract class DimensionFilterDataMixin {
                 ? DimensionFilterResources.merge(manager, files) : files;
     }
 
+    /** 滤镜网络加载优先解析新目录，未命中时回退原资源读取。 */
     @WrapOperation(method = "loadContentsFromNetwork", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/server/packs/resources/ResourceProvider;getResourceOrThrow(Lnet/minecraft/resources/ResourceLocation;)Lnet/minecraft/server/packs/resources/Resource;"))
     private static Resource shuttershadow$knownPackDimensionFile(

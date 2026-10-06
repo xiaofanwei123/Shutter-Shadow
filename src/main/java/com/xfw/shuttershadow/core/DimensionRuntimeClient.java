@@ -3,7 +3,7 @@ package com.xfw.shuttershadow.core;
 import com.xfw.shuttershadow.util.CHelper;
 import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.util.WorldContextHelper;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.xfw.shuttershadow.event.ClientCleanupEvent;
 import net.minecraft.ChatFormatting;
@@ -23,8 +23,10 @@ import com.xfw.shuttershadow.util.Helper;
 // Shuttershadow 第三轮修改：撤销客户端调试命令注册，保留远程世界与渲染初始化顺序。
 // Shuttershadow 第五轮裁剪：撤销门户动画和无效平台提示，保留相机多世界渲染初始化。
 // Shuttershadow 第六轮：仅初始化相机多世界运行与仍有消费者的通用工具。
+/** 初始化客户端维度内核及可选渲染适配器。 */
 public class DimensionRuntimeClient {
     
+    /** 在进入世界后执行一次硬件提示任务。 */
     private static void showNvidiaVideoCardWarning() {
         CoreSettings.CLIENT_TASK_LIST.addTask(MyTaskList.withDelayCondition(
             () -> Minecraft.getInstance().level == null,
@@ -43,6 +45,7 @@ public class DimensionRuntimeClient {
     }
     
     
+    /** 初始化多世界渲染、内存监测、可见区段及网络握手。 */
     public static void init() {
         ClientWorldLoader.init();
         
@@ -50,7 +53,7 @@ public class DimensionRuntimeClient {
         
         GcMonitor.initClient();
 
-//        showIntelVideoCardWarning();
+// 已停用的英特尔显卡提示。
         
         showNvidiaVideoCardWarning();
         
@@ -75,12 +78,12 @@ public class DimensionRuntimeClient {
             
             SodiumInterface.invoker = new SodiumInterface.OnSodiumPresent();
             
-            // Sodium compat is pretty ok now. No warning needed.
-//            CoreSettings.clientTaskList.addTask(MyTaskList.oneShotTask(() -> {
-//                if (CoreSettings.enableWarning) {
-//                    CHelper.printChat(
-//                        Component.translatable("shuttershadow.core.sodium_warning")
-//                            .append(WorldContextHelper.getDisableWarningText())
+            // 钠兼容已可正常使用，无需额外提示。
+// 已停用的钠兼容提示任务。
+// 原逻辑仅在允许显示提醒时执行。
+// 原逻辑向玩家聊天栏显示提醒。
+// 原逻辑使用本模组的钠提醒翻译文本。
+// 原逻辑附带关闭提醒的说明。
 //                    );
 //                }
 //            }));

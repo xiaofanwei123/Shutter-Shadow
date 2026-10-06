@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.teleportation;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
@@ -26,11 +26,12 @@ import com.xfw.shuttershadow.core.render.RenderStates;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 import com.xfw.shuttershadow.util.Helper;
 
-/** Client world transitions for server-authorized direct dimension transfers. */
+/** 客户端真实无缝换维度，复用已观察的ClientLevel/renderer与原LocalPlayer，避免传统respawn加载屏。 */
 public class ClientTeleportationManager {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final Minecraft client = Minecraft.getInstance();
 
+    /** 目标不同先changePlayerDimension，随后设脚底位置、调整载具、更新本帧状态并要求一次原版地形setup。 */
     public static void forceTeleportPlayer(ResourceKey<Level> toDimension, Vec3 destination) {
         LOGGER.info("client player force teleported {} {}", toDimension.location(), destination);
         
@@ -53,6 +54,7 @@ public class ClientTeleportationManager {
         MyGameRenderer.vanillaTerrainSetupOverride = 1;
     }
 
+    /** 取消骑乘，切网络handler world。 */
     public static void changePlayerDimension(
         LocalPlayer player, ClientLevel fromWorld, ClientLevel toWorld, Vec3 newEyePos
     ) {
@@ -89,7 +91,7 @@ public class ClientTeleportationManager {
         );
         
         if (client.particleEngine != null) {
-            // avoid clearing all particles
+            // 切换世界时保留已有粒子。
             ((IEParticleManager) client.particleEngine).ip_setWorld(toWorld);
         }
         
@@ -122,6 +124,7 @@ public class ClientTeleportationManager {
         
     }
 
+    /** 从旧ClientLevel移除普通客户端实体，换level/位置、清removed并加入目标，验证存活标记。 */
     public static void moveClientEntityAcrossDimension(
         Entity entity,
         ClientLevel newWorld,

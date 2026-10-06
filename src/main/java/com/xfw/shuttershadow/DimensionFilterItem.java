@@ -6,15 +6,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-/**
- * Exposure filter whose target dimension is stored as an item component.
- * A single registered item can therefore represent every data-pack route.
- */
+/** 一个物品ID承载所有目标维度变体。 */
 public final class DimensionFilterItem extends Item {
+    /** 以传入Properties创建Exposure FilterItem。 */
     public DimensionFilterItem(Properties properties) {
         super(properties);
     }
 
+    /** 有目标组件时生成item.shuttershadow.dimension_filter.<命名空间>.<路径>语言键。 */
     @Override
     public String getDescriptionId(ItemStack stack) {
         ResourceLocation target = DimensionFilters.target(stack);
@@ -23,6 +22,7 @@ public final class DimensionFilterItem extends Item {
                 + target.getNamespace() + "." + target.getPath().replace('/', '.');
     }
 
+    /** 按变体键取译名，缺少译名回退为带维度ID的英文名称。 */
     @Override
     public Component getName(ItemStack stack) {
         ResourceLocation target = DimensionFilters.target(stack);

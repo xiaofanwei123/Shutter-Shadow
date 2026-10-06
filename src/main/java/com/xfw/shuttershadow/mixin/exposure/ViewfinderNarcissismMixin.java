@@ -16,13 +16,14 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** 保持手持取景器与相机身份一致，默认自拍和关闭复位仍沿用 Exposure。 */
+/** 实现默认自拍并在换槽时安全关闭旧手持取景器。 */
 @Mixin(value = Viewfinder.class, remap = false)
 public abstract class ViewfinderNarcissismMixin {
     @Shadow @Final protected Camera camera;
+    /** Shadow 暴露原 selfie 子模块，实际更新仍由 Exposure 执行。 */
     @Shadow public abstract ViewfinderSelfie selfie();
 
-    /** 换槽后先关闭旧取景器，避免其自拍更新把设置写入新拿出的相机。 */
+    /** 换槽后关闭旧相机取景器，避免自拍设置写入新相机。 */
     @Inject(method = "tick", at = @At("HEAD"), cancellable = true)
     private void shuttershadow$closeDetachedHandheld(CallbackInfo callback) {
         Minecraft mc = Minecraft.getInstance();
@@ -37,6 +38,7 @@ public abstract class ViewfinderNarcissismMixin {
         }
     }
 
+    /** 自恋狂相机默认使用正面自拍，并同步取景器状态。 */
     @Inject(method = "setup", at = @At(value = "RETURN", ordinal = 1))
     private void shuttershadow$defaultSelfie(CallbackInfo callback) {
         if (CameraClient.viewfinder() == (Object) this

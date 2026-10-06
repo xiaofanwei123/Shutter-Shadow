@@ -12,10 +12,11 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** 只在服务器支持相机维度协议时，为四种移动包追加维度字段。 */
+/** 在服务器支持内核协议时为四种移动包附加维度字段。 */
 @Mixin({ServerboundMovePlayerPacket.Pos.class, ServerboundMovePlayerPacket.PosRot.class,
         ServerboundMovePlayerPacket.Rot.class, ServerboundMovePlayerPacket.StatusOnly.class})
 public class MixinServerboundMovePlayerPacketWrite {
+    /** 服务器支持内核协议时，在移动包末尾写入玩家维度。 */
     @Inject(method = "write", at = @At("RETURN"))
     private void shuttershadow$writeDimension(FriendlyByteBuf buf, CallbackInfo ci) {
         if (!CoreNetworkHandshake.doesServerHaveDimensionRuntime()) {

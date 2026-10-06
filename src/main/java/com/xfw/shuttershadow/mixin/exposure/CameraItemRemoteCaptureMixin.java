@@ -57,19 +57,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * 快门时刻的远程世界查询重定向。
- * <p>
- * 仅修改手动远景拍照的世界查询；红石照片保留源维度查询与原生截图，
- * 而相机、胶片、作者归属等仍然完全属于真实玩家。
- * <p>
- * 注入目标：Exposure 的 {@link CameraItem}。
- * {@code remap = false} 是因为 Exposure 是第三方模组，不参与 Minecraft 的混淆映射。
- */
+/** 将 Exposure 相机接入维度拍摄、胶卷传送和附魔流程。 */
 @Mixin(value = CameraItem.class, remap = false)
 public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttershadow.DimensionFilmCapture.TakePhotoInvoker {
 
-    /** 每次打开取景器时默认自拍，随后仍可手动切回普通模式。 */
+    /** 自恋狂相机打开时进入正面自拍并归零自拍旋转。 */
     @Inject(method = "activateInHand", at = @At("HEAD"))
     private void shuttershadow$openInSelfieMode(Player player, ItemStack camera, InteractionHand hand,
                                                CallbackInfoReturnable<InteractionResultHolder<ItemStack>> callback) {
@@ -80,13 +72,13 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         }
     }
 
-    /** Lets the delayed dimension-film transaction call Exposure's protected method. */
+    /** Invoker 暴露原 takePhoto 给内部准备事务恢复调用。 */
     @Invoker("takePhoto")
     @Override
     public abstract void shuttershadow$invokeTakePhoto(CameraHolder holder, ServerPlayer player,
                                                        ItemStack camera);
 
-    /** Delay only the first physical dimension-selfie shot until IP switched worlds. */
+    /** 将维度自拍和支架拍摄交给对应事务准备流程。 */
     @Inject(method = "takePhoto", at = @At("HEAD"), cancellable = true)
     private void shuttershadow$dimensionFilm(CameraHolder holder, ServerPlayer player,
                                              ItemStack camera, CallbackInfo callback) {
@@ -98,7 +90,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         }
     }
 
-    /** 手动和红石共用 Exposure 的拍摄后传送入口。 */
+    /** 没有支架延迟完成事务时执行玩家胶卷名单传送。 */
     @Inject(method = "takePhoto", at = @At("RETURN"))
     private void shuttershadow$teleportStandFilmPlayers(CameraHolder holder, ServerPlayer player,
                                                         ItemStack camera, CallbackInfo callback) {
@@ -111,7 +103,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         }
     }
 
-    /** 已生成帧的元数据及事件照常处理，实际胶卷数量等待截图完成再增加。 */
+    /** 包裹 addNewFrame 的 addFrameToFilm：曝光失效直接跳过写卷。 */
     @WrapOperation(method = "addNewFrame", at = @At(value = "INVOKE", target =
             "Lio/github/mortuusars/exposure/world/item/camera/CameraItem;addFrameToFilm(Lnet/minecraft/world/item/ItemStack;Lio/github/mortuusars/exposure/world/camera/frame/Frame;)V"))
     private void shuttershadow$commitAfterScreenshot(CameraItem item, ItemStack camera, Frame frame,
@@ -121,7 +113,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         if (!RemoteStandPreparation.deferFrameCommit(camera, frame)) original.call(item, camera, frame);
     }
 
-    /** 本次远程生物胶卷查询使用服务端范围；其它照片继续采用原生范围。 */
+    /** 按服务端半径查询远景生物，并从红石照片中移除玩家。 */
     @WrapOperation(method = "addNewFrame", at = @At(value = "INVOKE", target =
             "Lio/github/mortuusars/exposure/world/camera/frame/EntitiesInFrame;get(Lio/github/mortuusars/exposure/world/entity/CameraHolder;Lio/github/mortuusars/exposure/util/PointOfView;D)Ljava/util/List;"))
     private List<LivingEntity> shuttershadow$mobCaptureRange(CameraHolder holder, PointOfView view,
@@ -136,7 +128,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
                 ? entities.stream().filter(entity -> !(entity instanceof Player)).toList() : entities;
     }
 
-    /** 完成后才过片；原生关闭快门的组件与动画时序不受影响。 */
+    /** 将支架快门关闭动作延迟到截图完成。 */
     @WrapMethod(method = "onShutterClosed")
     private void shuttershadow$finishShutterAfterScreenshot(CameraHolder holder, ServerLevel level,
                                                             ItemStack camera, Operation<Void> original) {
@@ -145,7 +137,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         }
     }
 
-    /** 生物胶卷统一在 Exposure 验收图片后迁移实体，不改变截图流程。 */
+    /** 包裹 takePhoto 的 ExposureRepository.expect：曝光失效不期待上传。 */
     @WrapOperation(method = "takePhoto", at = @At(value = "INVOKE", target =
             "Lio/github/mortuusars/exposure/world/level/storage/ExposureRepository;expect(Lnet/minecraft/server/level/ServerPlayer;Ljava/lang/String;)V"))
     private void shuttershadow$mobFilmUploadCallback(ExposureRepository repository, ServerPlayer player,
@@ -157,7 +149,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         }
     }
 
-    /** 失效曝光只完成服务端事件，不建立截图、光影渲染或图片上传任务。 */
+    /** 曝光失效时跳过截图请求，直接完成无需上传的生物事务。 */
     @WrapOperation(method = "takePhoto", at = @At(value = "INVOKE", target =
             "Lio/github/mortuusars/exposure/network/Packets;sendToClient(Lio/github/mortuusars/exposure/network/packet/Packet;Lnet/minecraft/server/level/ServerPlayer;)V"))
     private void shuttershadow$discardExposureImage(Packet packet, ServerPlayer player,
@@ -171,7 +163,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         }
     }
 
-    /** 红石只传递原生源照片事务编号；手动支架继续传递现有远景场景。 */
+    /** 修改 CaptureStartS2CP 构造的参数：曝光失效只登记曝光 ID。 */
     @ModifyArg(method = "takePhoto", at = @At(value = "INVOKE", target =
             "Lio/github/mortuusars/exposure/network/packet/clientbound/CaptureStartS2CP;<init>(Lnet/minecraft/resources/ResourceLocation;Lio/github/mortuusars/exposure/world/camera/capture/CaptureParameters;)V"), index = 1)
     private CaptureParameters shuttershadow$standCaptureScene(CaptureParameters parameters,
@@ -201,12 +193,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
                 RemoteSceneStartS2C.CAPTURE_SCENE, scene).build();
     }
 
-    /**
-     * Exposure only scans entities that exist in the target level.  The stand
-     * operator intentionally remains in the source level, so add the same
-     * standard {@link EntityInFrame} record that Exposure would have created
-     * for a target-level player after the normal frame has been built.
-     */
+    /** 将源维度出镜玩家补入手动支架远景照片的实体元数据。 */
     @Inject(method = "createFrame", at = @At("RETURN"), cancellable = true)
     private void shuttershadow$addProjectedStandOperator(
             CameraHolder holder, ServerLevel level, ItemStack camera,
@@ -237,6 +224,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         callback.setReturnValue(mutable.toImmutable());
     }
 
+    /** 检查投影玩家可见性，去重后按距离插入照片实体名单。 */
     private static void addProjectedPlayer(RemoteCaptureContext remote, ServerPlayer player,
                                            PointOfView view, double fov,
                                            List<EntityInFrame> entitiesInFrame) {
@@ -260,25 +248,11 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
         if (insertAt < 10) entitiesInFrame.add(insertAt, projected);
     }
 
-    /**
-     * 影子方法，映射到 {@link CameraItem} 中同名的 {@code getProjection(ItemStack)}。
-     * 用于查询当前相机是否带有投影（例如望远镜模式）。
-     */
+    /** Shadow 声明原 getProjection，用于让现有投影照片避开维度相机替换。 */
     @Shadow
     protected abstract Optional<Projection> getProjection(ItemStack camera);
 
-    /**
-     * Exposure 在 {@code takePhoto} 中计算 {@code CaptureParameters.LIGHT_LEVEL}，
-     * 随后才调用 {@code addNewFrame}。这里重定向那一次世界光照查询，
-     * 使闪光灯选择、捕获参数与元数据都基于同一个权威的远程目标光照。
-     * <p>
-     * 重定向目标：{@code LevelUtil.getLightLevelAt(Level, BlockPos)} 的调用。
-     * <p>
-     * 额外参数 {@code holder}、{@code player}、{@code camera} 由 MixinExtras 从
-     * 目标方法上下文中捕获，用于解析远程捕获上下文。
-     *
-     * @return 若处于远程捕获会话，则返回远程世界对应方块的光照；否则返回原版查询结果。
-     */
+    /** 远景拍摄采用目标维度光照，普通拍摄采用源世界光照。 */
     @Redirect(method = "takePhoto", at = @At(value = "INVOKE",
             target = "Lio/github/mortuusars/exposure/world/level/LevelUtil;getLightLevelAt(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)I"))
     private int shuttershadow$targetLight(Level level, BlockPos position,
@@ -293,19 +267,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
                 : LevelUtil.getLightLevelAt(remote.level(), remote.asHolderEntity().blockPosition());
     }
 
-    /**
-     * 包裹 {@code addNewFrame}：在真正写入胶片帧之前，替换掉世界与相机持有者。
-     * <p>
-     * 若 {@code CaptureParameters} 带有投影（例如望远镜），则不做远程捕获，直接走原方法；
-     * 否则解析远程上下文。解析成功时，用远程世界与远程持有者调用原方法，
-     * 从而让帧数据基于远程维度生成；但相机、胶片与作者仍属于真实玩家。
-     *
-     * @param level      原始世界（通常是玩家所在维度）
-     * @param holder     原始相机持有者（通常是玩家）
-     * @param camera     相机物品
-     * @param parameters 捕获参数
-     * @param original   原方法调用包装器
-     */
+    /** 远景拍摄时替换世界和持有者，让元数据来自目标维度。 */
     @WrapMethod(method = "addNewFrame")
     private void shuttershadow$remoteCapture(ServerLevel level, CameraHolder holder, ItemStack camera,
                                              CaptureParameters parameters, Operation<Void> original) {

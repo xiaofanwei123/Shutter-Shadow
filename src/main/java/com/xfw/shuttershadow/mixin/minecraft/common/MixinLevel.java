@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.mixin.minecraft.common;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
@@ -11,9 +11,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.xfw.shuttershadow.access.IEWorld;
 
+/** 提供世界线程访问，并修正下界初始化时的雨雷渐变。 */
 @Mixin(Level.class)
 public abstract class MixinLevel implements IEWorld {
     
+    /** Shadow 引用原 dimension，供天气维度判定。 */
     @Shadow
     public abstract ResourceKey<Level> dimension();
     
@@ -33,7 +35,8 @@ public abstract class MixinLevel implements IEWorld {
     @Final
     private Thread thread;
     
-    // Fix overworld rain cause nether fog change
+    // 避免主世界降雨改变下界远景的雾效。
+    /** 清零下界雨雷渐变，避免源世界天气影响下界画面。 */
     @Inject(method = "Lnet/minecraft/world/level/Level;prepareWeather()V", at = @At("TAIL"))
     private void onInitWeatherGradients(CallbackInfo ci) {
         if (dimension() == Level.NETHER) {
@@ -44,6 +47,7 @@ public abstract class MixinLevel implements IEWorld {
         }
     }
     
+    /** 返回 Level.thread，供世界包处理/区块线程检查，不启动任务。 */
     @Override
     public Thread portal_getThread() {
         return thread;

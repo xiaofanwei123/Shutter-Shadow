@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.teleportation;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import com.mojang.logging.LogUtils;
 import com.xfw.shuttershadow.DimensionFilmCapture;
@@ -27,16 +27,18 @@ import com.xfw.shuttershadow.core.CoreConfig;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Direct dimension transfers used by the camera and entity transport API. */
+/** 执行各服务器的玩家、普通实体及骑乘载具传送。 */
 public class ServerTeleportationManager {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private final Set<Entity> teleportingEntities = new HashSet<>();
 
+    /** 取得服务器独立管理器。 */
     public static ServerTeleportationManager of(MinecraftServer server) {
         return ServerRuntimeState.of(server).teleportationManager;
     }
 
+    /** 注册每游戏刻清理传送标记的回调。 */
     public static void init() {
         NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class, event -> {
             of(event.getServer()).tick(event.getServer());
@@ -44,10 +46,12 @@ public class ServerTeleportationManager {
 
     }
 
+    /** 清理本游戏刻的传送标记。 */
     private void tick(MinecraftServer server) {
         teleportingEntities.clear();
     }
 
+    /** 默认发送位置包的玩家传送重载。 */
     public void forceTeleportPlayer(
         ServerPlayer player, ResourceKey<Level> dimensionTo, Vec3 newPos
     ) {
@@ -56,6 +60,7 @@ public class ServerTeleportationManager {
         );
     }
 
+    /** 校验目标与胶卷保护状态，执行玩家传送并按需发送位置包。 */
     public void forceTeleportPlayer(
         ServerPlayer player, ResourceKey<Level> dimensionTo, Vec3 newPos,
         boolean sendPacket
@@ -101,21 +106,22 @@ public class ServerTeleportationManager {
             );
         }
         
-        // reset the "authentic" player position as the current position
+        // 将移动校验使用的真实位置重置为玩家当前位置。
         player.connection.resetPosition();
         
 
         RemoteChunkTracking.immediatelyUpdateForPlayer(player);
     }
 
+    /** 标记传送状态，完成玩家跨维度切换与载具恢复。 */
     private void changePlayerDimension(
         ServerPlayer player,
         ServerLevel fromWorld,
         ServerLevel toWorld,
         Vec3 newEyePos
     ) {
-        // avoid the player from untracking all entities when removing from the old world
-        // see MixinChunkMap_E
+        // 从旧世界移除玩家时，保留无缝切换所需的实体跟踪状态。
+        // 对应处理位于区块映射实体跟踪混入中。
         teleportingEntities.add(player);
         
         Entity vehicle = player.getVehicle();
@@ -168,14 +174,16 @@ public class ServerTeleportationManager {
         }
         
         
-        //update advancements
+        // 更新跨维度相关进度。
         ((IEServerPlayerEntity) player).portal_worldChanged(fromWorld, oldPos);
     }
 
+    /** 判断实体是否正在本游戏刻内传送。 */
     public boolean isTeleporting(Entity entity) {
         return teleportingEntities.contains(entity);
     }
 
+    /** 校验实体和目标世界，执行普通实体传送。 */
     public Entity changeEntityDimension(
         Entity entity,
         ResourceKey<Level> toDimension,
@@ -221,6 +229,7 @@ public class ServerTeleportationManager {
         return newEntity;
     }
 
+    /** 在目标世界重建玩家的直接载具，并同步观察者状态。 */
     private Entity teleportVehicleAcrossDimensions(
         Entity entity,
         ServerLevel toWorld,
@@ -258,6 +267,7 @@ public class ServerTeleportationManager {
         return newEntity;
     }
 
+    /** 玩家走forceTeleportPlayer，其余走teleportRegularEntityTo。 */
     public static Entity teleportEntityGeneral(Entity entity, Vec3 targetPos, ServerLevel targetWorld) {
         if (entity instanceof ServerPlayer serverPlayer) {
             of(serverPlayer.server).forceTeleportPlayer(
@@ -270,6 +280,7 @@ public class ServerTeleportationManager {
         }
     }
 
+    /** 同维普通实体moveTo并同步头转角，跨维把脚底目的地换成眼位传给changeEntityDimension，返回实际新对象。 */
     @SuppressWarnings("unchecked")
     public static <E extends Entity> E teleportRegularEntityTo(
         E entity, ResourceKey<Level> targetDim, Vec3 targetPos

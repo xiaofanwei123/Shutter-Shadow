@@ -1,5 +1,5 @@
 package com.xfw.shuttershadow.core.chunk_loading;
-// Shuttershadow phase seven: relocated into the camera core.
+
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.ChatFormatting;
@@ -30,39 +30,38 @@ import com.xfw.shuttershadow.core.render.RemoteViewArea;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-/**
- * Vanilla use a 2D array to store the chunk references on client and cannot store the chunks that are far from player.
- * This use map to store the chunk references, to eliminate such limitation.
- * (Two maps, one for main thread and one for other threads)
- */
-//@OnlyIn(Dist.CLIENT)
+/** 使用双映射保存远程维度区块，支持玩家远处区块，并分别满足主线程和其他线程的访问需求。 */
+// 仅供客户端使用。
+/** ClientLevel的多中心客户端区块缓存。 */
 @VanillaRuntimeHooks
 public class RemoteClientChunkMap extends ClientChunkCache {
     private static final Logger LOGGER = LogManager.getLogger();
     
-    // the most chunk accesses are from the main thread,
-    // so we use two maps to reduce synchronization.
-    // the main thread accesses this map, without synchronization
+    // 大多数区块访问发生在主线程，
+    // 因此使用两份映射减少同步开销。
+    // 主线程访问此映射，无需同步。
     protected final Long2ObjectOpenHashMap<LevelChunk> chunkMapForMainThread =
         new Long2ObjectOpenHashMap<>();
-    // other threads read this map, with synchronization
+    // 其他线程通过同步访问此映射。
     protected final Long2ObjectOpenHashMap<LevelChunk> chunkMapForOtherThreads =
         new Long2ObjectOpenHashMap<>();
     
     public final Thread mainThread;
     
+    /** 构造父缓存并保存Minecraft主线程引用。 */
     public RemoteClientChunkMap(ClientLevel clientWorld) {
         super(clientWorld, 1);
-        // the chunk array is unused. make it small by passing 1 as load distance to super constructor
+        // 不使用父类区块数组，以加载距离 1 初始化以减少数组占用。
         
         mainThread = ((IEMinecraftClient) Minecraft.getInstance()).ip_getRunningThread();
     }
     
+    /** 主线程卸载指定区块，从双表移除、发NeoForge卸载事件、清level内容并通知Sodium及RemoteViewArea。 */
     @Override
     public void drop(ChunkPos chunkPos) {
         Validate.isTrue(Thread.currentThread() == mainThread);
         
-//        LOGGER.info("unload {} {}", level, chunkPos);
+// 已停用的区块卸载调试日志。
         
         LevelChunk chunk = chunkMapForMainThread.get(chunkPos.toLong());
         if (chunk != null) {
@@ -77,6 +76,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         }
     }
     
+    /** 主线程无锁读主表，其他线程在副表锁内调用读取函数。 */
     public <T> T readChunkMap(Function<Long2ObjectOpenHashMap<LevelChunk>, T> func) {
         if (Thread.currentThread() == mainThread) {
             return func.apply(chunkMapForMainThread);
@@ -88,6 +88,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         }
     }
     
+    /** 强制主线程，先改主表再锁副表应用同一mutation。 */
     public void modifyChunkMap(Consumer<Long2ObjectOpenHashMap<LevelChunk>> func) {
         Validate.isTrue(Thread.currentThread() == mainThread);
         func.accept(chunkMapForMainThread);
@@ -96,6 +97,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         }
     }
     
+    /** 查现有区块。 */
     @Override
     public LevelChunk getChunk(int x, int z, ChunkStatus chunkStatus, boolean create) {
         return readChunkMap(chunkMap -> {
@@ -108,6 +110,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         });
     }
     
+    /** 已存在区块更新群系，不存在记错误。 */
     @Override
     public void replaceBiomes(int x, int z, FriendlyByteBuf friendlyByteBuf) {
         Validate.isTrue(Thread.currentThread() == mainThread);
@@ -123,6 +126,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         }
     }
     
+    /** 创建或复用LevelChunk并解码packet，加入双表，通知世界已加载、NeoForge及Sodium。 */
     @Override
     public LevelChunk replaceWithPacketData(
         int x, int z,
@@ -137,7 +141,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
             worldChunk = new LevelChunk(this.level, new ChunkPos(x, z));
             loadChunkDataFromPacket(buf, nbt, worldChunk, consumer);
             
-            LevelChunk worldChunkToPut = worldChunk; // lambda can only capture effectively final variables
+            LevelChunk worldChunkToPut = worldChunk; // 匿名函数只能捕获实际未被重新赋值的变量。
             modifyChunkMap(chunkMap -> {
                 chunkMap.put(chunkPosLong, worldChunkToPut);
             });
@@ -150,15 +154,12 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         PlatformBridge.postClientChunkLoadEvent(worldChunk);
         SodiumInterface.invoker.onClientChunkLoaded(level, x, z);
         
-//        LOGGER.info("load {} {} {}", level, x, z);
+// 已停用的区块加载调试日志。
         
         return worldChunk;
     }
     
-    /**
-     * {@link net.minecraft.core.IdMap#byIdOrThrow(int)}
-     * {@link net.minecraft.world.level.chunk.LinearPalette#read(FriendlyByteBuf)}
-     */
+    /** 用原版replaceWithPacketData解码。 */
     private void loadChunkDataFromPacket(
         FriendlyByteBuf buf,
         CompoundTag nbt,
@@ -190,21 +191,25 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         }
     }
     
+    /** 空实现：目标缓存不使用原版环形窗口中心。 */
     @Override
     public void updateViewCenter(int x, int z) {
-        // do nothing
+        // 此处无需额外处理。
     }
     
+    /** 空实现：目标缓存不按原版固定半径裁剪。 */
     @Override
     public void updateViewRadius(int r) {
-        // do nothing
+        // 此处无需额外处理。
     }
     
+    /** 返回带已加载区块数量的统计字符串。 */
     @Override
     public String gatherStats() {
         return "Client Chunks (Shuttershadow) " + getLoadedChunksCount();
     }
     
+    /** 通过线程安全读入口返回缓存大小。 */
     @Override
     public int getLoadedChunksCount() {
         return readChunkMap(chunkMap -> {
@@ -212,6 +217,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         });
     }
     
+    /** 将目标光照section标脏到该维度LevelRenderer。 */
     @Override
     public void onLightUpdate(LightLayer lightType, SectionPos chunkSectionPos) {
         ClientWorldLoader.getWorldRenderer(level.dimension())
