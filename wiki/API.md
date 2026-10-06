@@ -1,6 +1,6 @@
 # Shuttershadow API 与扩展 Wiki
 
-本文面向接入其他模组、制作数据包和调整服务器的维护者。对应 Minecraft **1.21.1**、NeoForge **21.1.252**、Exposure **1.9.19** 的当前源码。完整类、方法和相机调用过程见 [代码 Wiki](CODE.md)，安装、启动和兼容概览见 [README](../README.md)。
+本文面向接入其他模组、制作数据包和调整服务器的维护者。对应 Minecraft **1.21.1**、NeoForge **21.1.252**、Exposure **1.9.19** 的当前源码。安装、启动和兼容概览见 [README](../README.md)。
 
 ## 1. 接入边界
 
@@ -409,18 +409,8 @@ NeoForge payload 注册版本是 **`12`**（`ShuttershadowNetwork.PROTOCOL_VERSI
 
 原维度由 Minecraft 原生区块/实体发送；相机额外世界包由维度标记重定向，原版与相机区块批次使用独立回执。观察会话含递增序号及滤镜完整路由校验，迟到旧场景不会替换新滤镜目标；照片使用独立负序号。数据包滤镜注册表同步继续使用 Exposure 原生机制。
 
-协议、维度数字 ID 和客户端多世界切换是内核细节，外部扩展不应直接拼网络消息替代 API。需要增加消息字段、修改 StreamCodec 或两端世界语义时，同步更新两端和协议版本，并检查 [代码 Wiki](CODE.md) 的网络及 Mixin 调用链。
+协议、维度数字 ID 和客户端多世界切换是内核细节，外部扩展不应直接拼网络消息替代 API。需要增加消息字段、修改 StreamCodec 或两端世界语义时，同步更新两端和协议版本，并核查源码中的网络及 Mixin 调用链。
 
 ## 10. 维护验证
 
-API 对应回归在 `tools` 中单独运行，不打入模组，也不在游戏启动时执行：
-
-- `test_seamless_teleportation_api.ps1`：输入、保护、身份及返回位置契约。
-- `test_seamless_teleport_command.ps1`：注册、权限、坐标、部分失败、玩家/载具批量选择。
-- `test_chunk_loader.py`：就绪状态与区域边界。
-- `test_dimension_filters_api.py`：完整物品谓词、路由 Codec、新目录、数据包堆叠与 known-pack 读取。
-- `test_camera_route_identity.py`：快速换滤镜、迟到场景、客户端/服务端视距上限。
-- `test_entity_search_range.ps1`：生物方块范围与嵌套查询恢复。
-- `test_core_native_config.ps1`：TOML、默认配置、重载和提醒开关。
-
-修改 API 契约时同时更新本文、对应生产调用和相关回归。GPU 光影、多人生物/载具和真实区块生成效果仍需游戏验证。
+修改 API 契约时同步更新本文和对应生产调用，并验证输入、权限、返回值及资源释放。GPU 光影、多人生物/载具和真实区块生成效果仍需游戏验证。

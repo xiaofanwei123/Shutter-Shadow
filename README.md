@@ -71,19 +71,16 @@ Sodium 的开发专用合并包仅用于处理其官方发行包的嵌套主体�
 .\gradlew.bat runClient
 .\gradlew.bat runData
 .\gradlew.bat verifyRendererRuntime
-python tools/verify_current_core.py
 ```
 
 构建结果在 `build/libs/shuttershadow-1.0.jar`。`runData` 生成附魔、标签和中英配置翻译；
 数据生成环境排除需要客户端渲染初始化的 Sodium、Iris 和 Exposure: Space，正常 Client 仍加载它们。
 
 项目结构：`src/main` 是生产代码与资源，`src/generated/resources` 是需保留的生成资源，
-`gradle` 包含 Wrapper 和开发渲染器处理，`tools` 是独立回归与打包检查，`wiki` 是维护文档。
-`tools/tests` 与 `tools/fixtures` 不属于模组源码集，不会打包或在游戏中加载。
+`gradle` 包含 Wrapper 和开发渲染器处理，`wiki` 是 API 与扩展文档。
 旧依赖源码副本、历史审查文档和迁移工具已移出项目。
 
 - [API Wiki](wiki/API.md)：无缝传送、区块加载、滤镜、数据包与配置的使用契约。
-- [代码 Wiki](wiki/CODE.md)：逐类逐方法职责、Mixin 作用和观察、拍摄、传送、释放流程。
 
 ## 上游与许可
 
