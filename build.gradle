@@ -1,0 +1,106 @@
+plugins {
+    id 'java-library'
+    id 'idea'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+
+version = mod_version
+group = mod_group_id
+base.archivesName = mod_id
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    maven { url = 'https://api.modrinth.com/maven' }
+    maven { url = 'https://cursemaven.com' }
+    maven { url = 'https://maven.blamejared.com/' }
+    maven { url = 'https://maven.theillusivec4.top/' }
+}
+
+def cameraDataSources = sourceSets.create('cameraData')
+configurations.cameraDataRuntimeClasspath.extendsFrom(configurations.runtimeClasspath)
+configurations.cameraDataRuntimeClasspath.exclude group: 'curse.maven', module: 'exposure-space-1580159'
+configurations.cameraDataRuntimeClasspath.exclude group: 'maven.modrinth', module: 'iris'
+cameraDataSources.runtimeClasspath = cameraDataSources.runtimeClasspath.filter {
+    it.name != 'sodium-0.8.13-neoforge-dev.jar'
+}
+cameraDataSources.runtimeClasspath += sourceSets.main.output
+
+neoForge {
+    version = project.neo_version
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+    accessTransformers.from('src/main/resources/META-INF/accesstransformer.cfg')
+    runs {
+        client { client() }
+        server {
+            server()
+            programArgument '--nogui'
+        }
+        data {
+            data()
+            sourceSet = cameraDataSources
+            programArguments.addAll '--mod', project.mod_id, '--all',
+                    '--output', file('src/generated/resources').absolutePath,
+                    '--existing', file('src/main/resources').absolutePath
+        }
+    }
+    mods {
+        "${mod_id}" { sourceSet(sourceSets.main) }
+    }
+}
+
+dependencies {
+    implementation 'curse.maven:exposure-871755:8957000'
+    implementation 'curse.maven:exposure-catalog-1023882:8533528'
+    implementation 'curse.maven:exposure-polaroid-1207005:8533496'
+    implementation 'curse.maven:exposure-expanded-1266524:6959722'
+    implementation 'curse.maven:exposure-space-1580159:8871584'
+    implementation 'curse.maven:architectury-api-419699:8492726'
+    implementation 'curse.maven:jei-238222:9009406'
+    implementation 'curse.maven:nbtedit-reborn-678133:6125444'
+    implementation 'curse.maven:wits-909375:8412915'
+    runtimeOnly 'maven.modrinth:sable:fg9dTRz9'
+    runtimeOnly 'maven.modrinth:create:UjX6dr61'
+}
+
+apply from: 'gradle/dev-renderers.gradle'
+
+sourceSets.main.resources.srcDir 'src/generated/resources'
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+def resourceModId = mod_id
+tasks.named('processResources', ProcessResources).configure {
+    exclude '**/.cache/**'
+    filesMatching('pack.mcmeta') { expand mod_id: resourceModId }
+}
+
+def generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    def replaceProperties = [minecraft_version: minecraft_version,
+                             minecraft_version_range: minecraft_version_range,
+                             neo_version: neo_version,
+                             neo_version_range: neo_version_range,
+                             loader_version_range: loader_version_range,
+                             mod_id: mod_id,
+                             mod_name: mod_name,
+                             mod_license: mod_license,
+                             mod_version: mod_version,
+                             mod_authors: mod_authors,
+                             mod_description: mod_description]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from 'src/main/templates'
+    into layout.buildDirectory.dir('generated/sources/modMetadata')
+}
+
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+idea.module {
+    downloadSources = true
+    downloadJavadoc = true
+}

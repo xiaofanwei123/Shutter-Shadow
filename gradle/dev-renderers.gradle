@@ -1,0 +1,130 @@
+abstract class ExtractSodiumCompileJar extends DefaultTask {
+    @InputFile abstract RegularFileProperty getArchive()
+    @OutputFile abstract RegularFileProperty getOutputJar()
+
+    @TaskAction
+    void extract() {
+        def output = outputJar.get().asFile
+        output.parentFile.mkdirs()
+        new java.util.zip.ZipFile(archive.get().asFile).withCloseable { zip ->
+            def entry = zip.entries().find {
+                it.name.startsWith('META-INF/jarjar/net.caffeinemc.sodium-') && it.name.endsWith('-mod.jar')
+            }
+            if (entry == null) throw new GradleException('Sodium compile JAR not found in distribution')
+            zip.getInputStream(entry).withCloseable { input ->
+                java.nio.file.Files.copy(input, output.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
+        }
+    }
+}
+
+abstract class PrepareSodiumDevJar extends DefaultTask {
+    @InputFile abstract RegularFileProperty getArchive()
+    @InputFile abstract RegularFileProperty getModJar()
+    @OutputFile abstract RegularFileProperty getOutputJar()
+
+    @TaskAction
+    void prepare() {
+        def outputFile = outputJar.get().asFile
+        outputFile.parentFile.mkdirs()
+        new java.util.zip.ZipFile(archive.get().asFile).withCloseable { distribution ->
+            def metadata = new groovy.json.JsonSlurper().parse(
+                    distribution.getInputStream(distribution.getEntry('META-INF/jarjar/metadata.json')))
+            def mainJar = metadata.jars.find {
+                it.path.startsWith('META-INF/jarjar/net.caffeinemc.sodium-') && it.path.endsWith('-mod.jar')
+            }
+            if (mainJar == null) throw new GradleException('Sodium implementation not found in JarJar metadata')
+            metadata.jars.remove(mainJar)
+            new java.util.zip.ZipOutputStream(new FileOutputStream(outputFile)).withCloseable { output ->
+                def copied = new HashSet<String>()
+                new java.util.zip.ZipFile(modJar.get().asFile).withCloseable { implementation ->
+                    PrepareSodiumDevJar.copyEntries(implementation, output, copied, Collections.emptySet())
+                }
+                PrepareSodiumDevJar.copyEntries(distribution, output, copied, [mainJar.path, 'META-INF/jarjar/metadata.json'] as Set)
+                output.putNextEntry(new java.util.zip.ZipEntry('META-INF/jarjar/metadata.json'))
+                output.write(groovy.json.JsonOutput.toJson(metadata).getBytes('UTF-8'))
+                output.closeEntry()
+            }
+        }
+    }
+
+    private static void copyEntries(java.util.zip.ZipFile source, java.util.zip.ZipOutputStream output,
+                                    Set<String> copied, Set<String> excluded) {
+        source.entries().each { entry ->
+            if (!entry.directory && !excluded.contains(entry.name) && copied.add(entry.name)) {
+                output.putNextEntry(new java.util.zip.ZipEntry(entry.name))
+                source.getInputStream(entry).withCloseable { input -> input.transferTo(output) }
+                output.closeEntry()
+            }
+        }
+    }
+}
+
+configurations {
+    sodiumCompileArtifact {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
+}
+
+abstract class VerifyRendererRuntime extends DefaultTask {
+    @InputFiles abstract ConfigurableFileCollection getRuntimeFiles()
+
+    @TaskAction
+    void verify() {
+        def sodiumJars = []
+        def irisJars = []
+        runtimeFiles.files.findAll { it.name.endsWith('.jar') }.each { file ->
+            new java.util.zip.ZipFile(file).withCloseable { zip ->
+                if (zip.getEntry('net/caffeinemc/mods/sodium/client/render/SodiumWorldRenderer.class') != null) {
+                    sodiumJars.add(file)
+                    if (zip.getEntry('sodium-common.mixins.json') == null ||
+                            zip.getEntry('sodium-neoforge.mixins.json') == null) {
+                        throw new GradleException('Sodium implementation is missing Mixin configs: ' + file)
+                    }
+                }
+                if (zip.getEntry('net/irisshaders/iris/Iris.class') != null) irisJars.add(file)
+                if (zip.getEntry('META-INF/services/net.neoforged.neoforgespi.earlywindow.GraphicsBootstrapper') != null &&
+                        zip.getEntry('net/caffeinemc/mods/sodium/service/SodiumWorkarounds.class') != null &&
+                        zip.getEntry('net/caffeinemc/mods/sodium/client/render/SodiumWorldRenderer.class') == null) {
+                    throw new GradleException('Sodium service-only distribution is on the userdev classpath: ' + file)
+                }
+            }
+        }
+        if (sodiumJars.size() != 1 || irisJars.size() != 1) {
+            throw new GradleException('Unexpected renderer classpath: Sodium=' + sodiumJars + ', Iris=' + irisJars)
+        }
+        logger.lifecycle('Development renderer runtime verified: Sodium={}, Iris={}', sodiumJars, irisJars)
+    }
+}
+
+def extractSodiumCompileJar = tasks.register('extractSodiumCompileJar', ExtractSodiumCompileJar) {
+    archive.fileProvider(configurations.sodiumCompileArtifact.elements.map { it.first().asFile })
+    outputJar = layout.buildDirectory.file('render-compat/sodium-mod.jar')
+}
+
+def prepareSodiumDevJar = tasks.register('prepareSodiumDevJar', PrepareSodiumDevJar) {
+    archive.fileProvider(configurations.sodiumCompileArtifact.elements.map { it.first().asFile })
+    modJar = extractSodiumCompileJar.flatMap { it.outputJar }
+    outputJar = layout.buildDirectory.file('render-compat/sodium-0.8.13-neoforge-dev.jar')
+}
+
+
+dependencies {
+    sodiumCompileArtifact 'maven.modrinth:sodium:mc1.21.1-0.8.13-neoforge'
+    compileOnly files(extractSodiumCompileJar.flatMap { it.outputJar })
+    runtimeOnly files(prepareSodiumDevJar.flatMap { it.outputJar })
+    implementation 'maven.modrinth:iris:1.8.14-beta.1+1.21.1-neoforge'
+}
+
+def verifyRendererRuntime = tasks.register('verifyRendererRuntime', VerifyRendererRuntime) {
+    runtimeFiles.from(sourceSets.main.runtimeClasspath)
+}
+
+neoForge.ideSyncTask prepareSodiumDevJar
+neoForge.ideSyncTask verifyRendererRuntime
+neoForge.runs.named('client') {
+    taskBefore(tasks.named('prepareClientRun'))
+    taskBefore(verifyRendererRuntime)
+}
