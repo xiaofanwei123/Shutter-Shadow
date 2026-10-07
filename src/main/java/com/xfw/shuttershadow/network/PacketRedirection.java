@@ -8,7 +8,6 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.BundleDelimiterPacket;
 import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.common.ClientCommonPacketListener;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
@@ -16,7 +15,6 @@ import net.minecraft.network.protocol.game.ClientboundBundlePacket;
 import net.minecraft.network.protocol.game.GameProtocols;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
@@ -27,11 +25,9 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.xfw.shuttershadow.access.IEWorld;
-import com.xfw.shuttershadow.mixin.minecraft.server.MixinServerGamePacketListenerImpl_Redirect;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Supplier;
 
 /** 给原版客户端游戏包附加维度，让同一连接同步多个世界。 */
 public class PacketRedirection {
@@ -44,17 +40,8 @@ public class PacketRedirection {
     private static final ThreadLocal<ResourceKey<Level>> serverPacketRedirection =
         ThreadLocal.withInitial(() -> null);
 
-    /** 把Runnable包装到带返回值的强制维度作用域。 */
+    /** 校验世界线程，在临时重定向维度中执行并恢复旧值。 */
     public static void withForceRedirect(ServerLevel world, Runnable func) {
-        withForceRedirectAndGet(world, () -> {
-            func.run();
-            return null;
-        });
-    }
-    
-    /** 校验世界线程，临时设定重定向维度，执行Supplier并在finally恢复旧值。 */
-    @SuppressWarnings("UnusedReturnValue")
-    public static <T> T withForceRedirectAndGet(ServerLevel world, Supplier<T> func) {
         if (((IEWorld) world).portal_getThread() != Thread.currentThread()) {
             LOGGER.error(
                 "It's possible that a mod is trying to handle packet in networking thread instead of server thread. This is not thread safe and can cause rare bugs! (Shuttershadow is checking the packet handling thread)",
@@ -71,7 +58,7 @@ public class PacketRedirection {
         }
         
         try {
-            return func.get();
+            func.run();
         }
         finally {
             if (oldRedirection != redirectDim) {
@@ -100,7 +87,6 @@ public class PacketRedirection {
         else {
             serverPlayNetworkHandler.send(
                 createRedirectedMessage(
-                    serverPlayNetworkHandler.player.server,
                     dimension,
                     packet
                 )
@@ -111,7 +97,6 @@ public class PacketRedirection {
     /** 已重定向包直接复用。 */
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static Packet<ClientGamePacketListener> createRedirectedMessage(
-        MinecraftServer server,
         ResourceKey<Level> dimension,
         Packet<ClientGamePacketListener> packet
     ) {
@@ -127,7 +112,7 @@ public class PacketRedirection {
             List<Packet<ClientGamePacketListener>> newSubPackets = new ArrayList<>();
             for (var subPacket : bundlePacket.subPackets()) {
                 newSubPackets.add(createRedirectedMessage(
-                    server, dimension, (Packet<ClientGamePacketListener>) subPacket
+                    dimension, (Packet<ClientGamePacketListener>) subPacket
                 ));
             }
             
@@ -155,7 +140,7 @@ public class PacketRedirection {
         ResourceKey<Level> dimension,
         Packet<ClientGamePacketListener> packet
     ) {
-        player.connection.send(createRedirectedMessage(player.server, dimension, packet));
+        player.connection.send(createRedirectedMessage(dimension, packet));
     }
 
     // 此判断不处理捆绑数据包。
@@ -180,7 +165,7 @@ public class PacketRedirection {
         ResourceKey<Level> dimension, Packet<? extends ClientGamePacketListener> packet
     ) implements CustomPacketPayload {
         public static final CustomPacketPayload.Type<Payload> TYPE =
-            new Type<>(ResourceLocation.parse(payloadId.toString()));
+            new Type<>(payloadId);
 
         public static final StreamCodec<RegistryFriendlyByteBuf, Payload> CODEC =
             StreamCodec.of(

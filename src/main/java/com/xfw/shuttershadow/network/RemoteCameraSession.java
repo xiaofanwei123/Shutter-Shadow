@@ -111,10 +111,7 @@ public final class RemoteCameraSession {
                 request.targetDimension(), request.cameraStandId());
         if (mapping == null) return;
         ResourceLocation targetId = mapping.dimension();
-        if (targetId == null) return;
         ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, targetId);
-        // 缺少来源路由时，此滤镜在当前维度不提供远景。
-        if (key.equals(player.level().dimension())) return;
         ServerLevel target = player.getServer().getLevel(key);
         if (target == null) return;
 
@@ -178,8 +175,7 @@ public final class RemoteCameraSession {
     private void sendScene(int maxRenderDistance) {
         PacketDistributor.sendToPlayer(owner, new RemoteSceneStartS2C(
                 sequence, remoteLevel.dimension().location(), targetOrigin,
-                sourceOrigin, coordinateScale, maxRenderDistance, sourceDimension.location(),
-                List.of()));
+                sourceOrigin, coordinateScale, maxRenderDistance, sourceDimension.location()));
         advertisedMaxRenderDistance = maxRenderDistance;
     }
 
@@ -234,11 +230,6 @@ public final class RemoteCameraSession {
                 ShuttershadowConfig.maxRemoteViewDistance()));
     }
 
-    /** 创建独立照片loader及场景，不替换正在看的预览会话。 */
-    public static RemoteSceneStartS2C openCapture(ServerPlayer player, RemoteCaptureContext remote) {
-        return createCapture(player, remote);
-    }
-
     /** 分配持续递减的负照片序号，与客户端正预览序号区分。 */
     static long allocateCaptureSequence() { return --nextCaptureSequence; }
 
@@ -249,8 +240,8 @@ public final class RemoteCameraSession {
         return new ChunkLoader(dimension, block.getX() >> 4, block.getZ() >> 4, radius);
     }
 
-    /** 照片沿用匹配预览窗口半径，否则取玩家请求半径，再钳制服务器上限。 */
-    private static RemoteSceneStartS2C createCapture(ServerPlayer player, RemoteCaptureContext remote) {
+    /** 创建独立照片订阅，沿用匹配预览半径并钳制服务器上限。 */
+    public static RemoteSceneStartS2C openCapture(ServerPlayer player, RemoteCaptureContext remote) {
         Vec3 position = remote.asHolderEntity().position();
         BlockPos block = BlockPos.containing(position);
         RemoteCameraSession preview = active(player.getUUID());
@@ -269,7 +260,7 @@ public final class RemoteCameraSession {
         return new RemoteSceneStartS2C(sequence, remote.level().dimension().location(), position,
                 remote.source().asHolderEntity().position(), remote.coordinateScale(),
                 serverMaxRenderDistance(player),
-                remote.source().asHolderEntity().level().dimension().location(), List.of());
+                remote.source().asHolderEntity().level().dimension().location());
     }
 
     /** 只保留摄影师本人或其源区块已在远同步/原版已发送状态的候选玩家，避免等待照片视角之外的区块。 */
@@ -314,11 +305,6 @@ public final class RemoteCameraSession {
         }
     }
 
-    /** 真实维度移动前仅移除服务端预览订阅，不提前发客户端视角恢复包。 */
-    public static void closeBeforeDimensionTeleport(ServerPlayer player) {
-        close(player);
-    }
-
     /** 真实移动包排入连接之后才发RemoteSceneStop，避免支架视角在旧世界短暂恢复。 */
     public static void finishDimensionTeleport(ServerPlayer player) {
         PacketDistributor.sendToPlayer(player, new RemoteSceneStopS2C());
@@ -343,8 +329,6 @@ public final class RemoteCameraSession {
     }
     /** 返回目标世界。 */
     public ServerLevel remoteLevel() { return remoteLevel; }
-    /** 返回当前滤镜物品ID。 */
-    public ResourceLocation filterId() { return filterId; }
     /** 比较完整路由记录，防止同物品ID的不同目标滤镜复用旧场景。 */
     public boolean matchesRoute(DimensionFilters.Route current) { return mapping.equals(current); }
     /** 返回水平映射比例。 */

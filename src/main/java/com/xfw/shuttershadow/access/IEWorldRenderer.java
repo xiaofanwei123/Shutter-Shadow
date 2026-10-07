@@ -6,13 +6,9 @@ import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.ViewArea;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.client.renderer.culling.Frustum;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 
 /** MixinLevelRenderer实现的renderer内部状态桥。 */
 public interface IEWorldRenderer {
-    /** 取得实体渲染dispatcher。 */
-    EntityRenderDispatcher ip_getEntityRenderDispatcher();
-    
     /** 取得ViewArea存储。 */
     ViewArea ip_getBuiltChunkStorage();
     

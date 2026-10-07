@@ -53,7 +53,7 @@ public class MixinPlayerList_Misc {
         CallbackInfo ci
     ) {
         player.connection.send(
-            MiscNetworking.DimIdSyncPacket.createPacket(player.server)
+            MiscNetworking.DimIdSyncPacket.createFromServer(player.server)
         );
     }
 }

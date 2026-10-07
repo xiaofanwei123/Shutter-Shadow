@@ -14,13 +14,11 @@ import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.ViewArea;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.client.renderer.culling.Frustum;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.Validate;
 import org.jetbrains.annotations.Nullable;
-import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
@@ -48,10 +46,6 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     
     @Shadow
     private ClientLevel level;
-    
-    @Shadow
-    @Final
-    private EntityRenderDispatcher entityRenderDispatcher;
     
     @Shadow
     private ViewArea viewArea;
@@ -238,18 +232,6 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
         ClientWorldLoader._onWorldRendererReloaded();
     }
     
-    /** renderSky 返回恢复面剔除状态，防止天空 pass 留下影响后续实体或地形的 GL culling。 */
-    @Inject(
-        method = "renderSky",
-        at = @At("RETURN")
-    )
-    private void onRenderSkyEnd(
-        Matrix4f modelView, Matrix4f matrix4f, float f, Camera camera,
-        boolean bl, Runnable runnable, CallbackInfo ci
-    ) {
-        MyRenderHelper.recoverFaceCulling();
-    }
-    
     // 修正天空渲染使用的观察位置。
     /** 远景天空渲染使用远景相机位置，其余视角沿用玩家眼位。 */
     @Redirect(
@@ -298,14 +280,6 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
         ClientWorldLoader.withSwitchedWorld(
             world, world::pollLightUpdates
         );
-    }
-    
-    /** 返回 entityRenderDispatcher，供多世界渲染管理保存/设置实体绘制环境。 */
-    
-    
-    @Override
-    public EntityRenderDispatcher ip_getEntityRenderDispatcher() {
-        return entityRenderDispatcher;
     }
     
     /** 返回 viewArea，供网格发现、重定位和资源释放使用。 */

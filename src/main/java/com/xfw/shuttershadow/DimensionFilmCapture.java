@@ -123,13 +123,9 @@ public final class DimensionFilmCapture {
         DimensionFilters.Route mapping = DimensionFilters.resolve(
                 player.serverLevel().registryAccess(), filter,
                 player.serverLevel().dimension().location());
-        if (mapping == null || mapping.dimension() == null) return false;
+        if (mapping == null) return false;
 
         ResourceKey<Level> targetKey = ResourceKey.create(Registries.DIMENSION, mapping.dimension());
-        if (targetKey.equals(player.level().dimension())) {
-            // 已在目标世界，直接使用原生拍摄。
-            return false;
-        }
         ServerLevel target = player.getServer().getLevel(targetKey);
         if (target == null) return false;
 
@@ -181,7 +177,7 @@ public final class DimensionFilmCapture {
                     operator.removeActiveExposureCamera();
                 }
                 // 必须先停止源维度取景会话，避免它在真实传送后重新接管画面。
-                RemoteCameraSession.closeBeforeDimensionTeleport(player);
+                RemoteCameraSession.close(player);
                 teleport(player, remote.level().dimension(), remote.targetPosition(player));
                 // 让客户端先处理 IP 的世界切换，再结束 Exposure 的远程相机状态。
                 RemoteCameraSession.finishDimensionTeleport(player);

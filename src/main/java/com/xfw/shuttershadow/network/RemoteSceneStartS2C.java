@@ -2,39 +2,21 @@ package com.xfw.shuttershadow.network;
 
 import com.xfw.shuttershadow.Shuttershadow;
 import io.github.mortuusars.exposure.util.ExtraData;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.List;
-import java.util.UUID;
-
-/** 目标场景快照：预览/照片序号、两个原点、比例、视距上限、来源维度和投影玩家UUID。 */
+/** 目标场景快照：预览/照片序号、两个原点、比例、视距上限和来源维度。 */
 public record RemoteSceneStartS2C(long sequence,
                                   ResourceLocation dimension,
                                   Vec3 position,
                                   Vec3 sourceOrigin,
                                   double coordinateScale,
                                   int maxRenderDistance,
-                                  ResourceLocation sourceDimension,
-                                  List<UUID> projectedPlayers)
+                                  ResourceLocation sourceDimension)
         implements CustomPacketPayload {
-
-    /** 紧凑构造器复制玩家列表为只读快照。 */
-    public RemoteSceneStartS2C {
-        projectedPlayers = List.copyOf(projectedPlayers);
-    }
-
-    /** 保留其他字段，替换投影名单创建新记录。 */
-    public RemoteSceneStartS2C withProjectedPlayers(List<UUID> players) {
-        return new RemoteSceneStartS2C(sequence, dimension, position, sourceOrigin, coordinateScale,
-                maxRenderDistance, sourceDimension, players);
-    }
 
     /** 仅随 Exposure 截图请求传输，不写入照片帧；手动支架照片使用独立的临时会话。 */
     public static final ExtraData.Type<RemoteSceneStartS2C> CAPTURE_SCENE = new ExtraData.Type<>(
@@ -46,9 +28,7 @@ public record RemoteSceneStartS2C(long sequence,
                         scene.getOrDefault(ExtraData.Type.vec3("position"), Vec3.ZERO),
                         scene.getOrDefault(ExtraData.Type.vec3("source_origin"), Vec3.ZERO),
                         scene.getDouble("scale"), scene.getInt("distance"),
-                        ResourceLocation.parse(scene.getString("source_dimension")),
-                        scene.getList("projected_players", Tag.TAG_INT_ARRAY).stream()
-                                .map(NbtUtils::loadUUID).toList());
+                        ResourceLocation.parse(scene.getString("source_dimension")));
             },
             (data, key, scene) -> {
                 ExtraData tag = new ExtraData();
@@ -59,9 +39,6 @@ public record RemoteSceneStartS2C(long sequence,
                 tag.putDouble("scale", scene.coordinateScale());
                 tag.putInt("distance", scene.maxRenderDistance());
                 tag.putString("source_dimension", scene.sourceDimension().toString());
-                ListTag players = new ListTag();
-                scene.projectedPlayers().forEach(player -> players.add(NbtUtils.createUUID(player)));
-                tag.put("projected_players", players);
                 data.put(key, tag);
             });
 
@@ -76,7 +53,7 @@ public record RemoteSceneStartS2C(long sequence,
     public static final StreamCodec<FriendlyByteBuf, RemoteSceneStartS2C> STREAM_CODEC = StreamCodec.of(
             RemoteSceneStartS2C::encode, RemoteSceneStartS2C::decode);
 
-    /** 按固定顺序编码全部场景字段及UUID列表。 */
+    /** 按固定顺序编码全部场景字段。 */
     private static void encode(FriendlyByteBuf buf, RemoteSceneStartS2C value) {
         buf.writeVarLong(value.sequence());           // 变长 long：sequence 通常较小，省字节
         buf.writeResourceLocation(value.dimension()); // 维度 ID
@@ -85,7 +62,6 @@ public record RemoteSceneStartS2C(long sequence,
         buf.writeDouble(value.coordinateScale());     // 水平缩放系数
         buf.writeVarInt(value.maxRenderDistance());   // 服务端上限
         buf.writeResourceLocation(value.sourceDimension());
-        buf.writeCollection(value.projectedPlayers(), (buffer, player) -> buffer.writeUUID(player));
     }
 
     /** 按encode相同顺序解码全部字段。 */
@@ -97,8 +73,7 @@ public record RemoteSceneStartS2C(long sequence,
                 buf.readVec3(),
                 buf.readDouble(),
                 buf.readVarInt(),
-                buf.readResourceLocation(),
-                buf.readList(buffer -> buffer.readUUID()));
+                buf.readResourceLocation());
     }
 
     /** 返回remote_scene_start类型。 */

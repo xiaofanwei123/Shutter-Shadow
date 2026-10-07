@@ -260,7 +260,6 @@ public class RemoteChunkTracking {
                             EventHooks.fireChunkUnWatch(player, new ChunkPos(record.chunkPos), player.getServer().getLevel(record.dimension));
                             player.connection.send(
                                     PacketRedirection.createRedirectedMessage(
-                                            player.getServer(),
                                             record.dimension,
                                             new ClientboundForgetLevelChunkPacket(
                                                     new ChunkPos(record.chunkPos)

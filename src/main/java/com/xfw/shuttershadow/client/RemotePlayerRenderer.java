@@ -3,6 +3,7 @@ package com.xfw.shuttershadow.client;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -51,7 +52,7 @@ public final class RemotePlayerRenderer {
             if (!frustum.isVisible(box)) return;
         }
 
-        EntityRenderDispatcher dispatcher = remoteRenderer.ip_getEntityRenderDispatcher();
+        EntityRenderDispatcher dispatcher = Minecraft.getInstance().getEntityRenderDispatcher();
         EntityRenderer<? super AbstractClientPlayer> entityRenderer =
                 dispatcher.getRenderer(projection.player());
         if (entityRenderer == null) return;

@@ -92,7 +92,7 @@ public final class RemoteCaptureContext implements CameraHolder {
         ServerLevel sourceLevel = (ServerLevel) cameraEntity.level();
         DimensionFilters.Route mapping = DimensionFilters.resolve(
                 sourceLevel.registryAccess(), filter, sourceLevel.dimension().location());
-        if (mapping == null || mapping.dimension() == null) return null;
+        if (mapping == null) return null;
         if (session != null && !session.matchesRoute(mapping)) session = null;
         if (session != null) {
             return new RemoteCaptureContext(source, session, player, cameraEntity);
@@ -101,7 +101,6 @@ public final class RemoteCaptureContext implements CameraHolder {
         // 独立解析支架滤镜路由，手动远景拍摄与红石传送都可查询同一个目标。
         if (!(cameraEntity instanceof CameraStandEntity stand)) return null;
         ResourceKey<Level> targetKey = ResourceKey.create(Registries.DIMENSION, mapping.dimension());
-        if (targetKey.equals(sourceLevel.dimension())) return null;
         ServerLevel remoteLevel = player.getServer().getLevel(targetKey);
         if (remoteLevel == null) return null;
         double scale = DimensionFilters.horizontalScale(mapping, sourceLevel, remoteLevel);

@@ -5,7 +5,6 @@ import com.xfw.shuttershadow.Shuttershadow;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
-import net.minecraft.client.multiplayer.prediction.BlockStatePredictionHandler;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.protocol.game.*;
 import net.minecraft.resources.ResourceKey;
@@ -24,13 +23,10 @@ import com.xfw.shuttershadow.access.IEClientPlayNetworkHandler;
 import com.xfw.shuttershadow.access.IEPlayerPositionLookS2CPacket;
 import com.xfw.shuttershadow.network.CoreNetworkHandshake;
 import com.xfw.shuttershadow.core.teleportation.ClientTeleportationManager;
-import com.xfw.shuttershadow.util.CountDownInt;
 
 /** 处理多世界位置、载具、实体、时钟和方块预测同步。 */
 @Mixin(ClientPacketListener.class)
 public abstract class MixinClientPacketListener implements IEClientPlayNetworkHandler {
-    private static CountDownInt LOG_LIMIT = new CountDownInt(20);
-    
     @Shadow
     private ClientLevel level;
     
@@ -107,25 +103,6 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
                 ci.cancel();
             }
         }
-    }
-    
-    // 用于调试。
-    /** 重定向 handleSetEntityData 的实体查找，只在当前处理世界取 ID。 */
-    @Redirect(
-        method = "Lnet/minecraft/client/multiplayer/ClientPacketListener;handleSetEntityData(Lnet/minecraft/network/protocol/game/ClientboundSetEntityDataPacket;)V",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/multiplayer/ClientLevel;getEntity(I)Lnet/minecraft/world/entity/Entity;"
-        )
-    )
-    private Entity redirectGetEntityById(ClientLevel clientWorld, int id) {
-        Entity entity = clientWorld.getEntity(id);
-        if (entity == null) {
-            if (LOG_LIMIT.tryDecrement()) {
-                Shuttershadow.LOGGER.warn("missing entity for data tracking {} {}", clientWorld, id);
-            }
-        }
-        return entity;
     }
     
     // 将各客户端维度的游戏时间保持同步。

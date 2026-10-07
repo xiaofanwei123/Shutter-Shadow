@@ -115,7 +115,7 @@ public class MyGameRenderer {
         // 投影矩阵包含视角摇晃，
         // 摇晃效果会受到视图缩放的影响。
         Matrix4f oldProjectionMatrix = RenderSystem.getProjectionMatrix();
-        Matrix4fStack oldModelViewStack = IERenderSystem.ip_getModelViewStack();
+        Matrix4fStack oldModelViewStack = RenderSystem.getModelViewStack();
         
         ObjectArrayList<SectionRenderDispatcher.RenderSection> newChunkInfoList =
             VisibleSectionDiscovery.takeList();

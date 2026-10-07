@@ -94,14 +94,6 @@ public abstract class MixinClientLevel implements IEClientWorld {
         }
     }
     
-    // 用于调试。
-    /** toString 直接显示 ClientWorld 和维度 ID，帮助路由诊断。 */
-    @Inject(method = "Lnet/minecraft/client/multiplayer/ClientLevel;toString()Ljava/lang/String;", at = @At("HEAD"), cancellable = true)
-    private void onToString(CallbackInfoReturnable<String> cir) {
-        ClientLevel this_ = (ClientLevel) (Object) this;
-        cir.setReturnValue("ClientWorld " + this_.dimension().location());
-    }
-    
     /** 将 levelRenderer 引用置空，远世界完整销毁时断开其渲染器引用。 */
     @Override
     public void ip_resetWorldRendererRef() {

@@ -15,11 +15,7 @@ import org.apache.commons.lang3.Validate;
 import org.joml.Matrix4f;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
-import com.xfw.shuttershadow.core.render.RenderStates;
 
-
-import static org.lwjgl.opengl.GL11.GL_BACK;
-import static org.lwjgl.opengl.GL11.glCullFace;
 
 /** 目标场景帧缓冲/雾填充、远光照更新及GPU上传时序辅助。 */
 public class MyRenderHelper {
@@ -36,14 +32,8 @@ public class MyRenderHelper {
         RenderSystem.depthMask(true);
         return true;
     }
-    
-    
-    
+
     // 原版将着色器命名空间固定为游戏自身的命名空间。
-    
-    
-    
-    
     /** 将浮点颜色转换为整数颜色，绘制全屏背景。 */
     public static void renderScreenTriangle(Vec3 color) {
         renderScreenTriangle(
@@ -53,14 +43,12 @@ public class MyRenderHelper {
             255
         );
     }
-    
-    
     /** 使用指定颜色绘制全屏背景，并清理着色器状态。 */
     @VanillaRuntimeHooks
     public static void renderScreenTriangle(int r, int g, int b, int a) {
         ShaderInstance shader = GameRenderer.getPositionColorShader();
         Validate.notNull(shader);
-        
+
         Matrix4f identityMatrix = new Matrix4f();
         identityMatrix.identity();
         
@@ -85,13 +73,6 @@ public class MyRenderHelper {
         
         shader.clear();
     }
-    
-    /** 沿用原版渲染目标输出到屏幕的处理方式。 */
-
-
-    
-    
-    /** 沿用原版渲染目标输出到屏幕的处理方式。 */
     
     // 清除已标记移除的光照区段，
     // 避免光照数据残留造成内存泄漏，
@@ -122,13 +103,4 @@ public class MyRenderHelper {
             }
         });
     }
-    
-    /** 恢复背面剔除模式。 */
-    public static void recoverFaceCulling() {
-        glCullFace(GL_BACK);
-    }
-    
-    
-    
-    
 }

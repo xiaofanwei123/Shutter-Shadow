@@ -158,7 +158,7 @@ public class PlayerChunkLoading {
                 if (sentNum.getValue() == 0) {
                     ++this.unacknowledgedBatches;
                     // 相机批次使用包装标记，由客户端独立统计和确认。
-                    connection.send(PacketRedirection.createRedirectedMessage(server,
+                    connection.send(PacketRedirection.createRedirectedMessage(
                             serverPlayer.level().dimension(), ClientboundChunkBatchStartPacket.INSTANCE));
                 }
                 sentNum.increment();
@@ -176,7 +176,7 @@ public class PlayerChunkLoading {
         }
         
         if (sentNum.getValue() != 0) {
-            connection.send(PacketRedirection.createRedirectedMessage(server,
+            connection.send(PacketRedirection.createRedirectedMessage(
                     serverPlayer.level().dimension(), new ClientboundChunkBatchFinishedPacket(sentNum.getValue())));
         }
         

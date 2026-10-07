@@ -35,11 +35,9 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /** 管理服务端支架拍摄、照片完成确认和胶卷传送。 */
@@ -89,12 +87,10 @@ public final class RemoteStandPreparation {
         private final long sequence;
         private final Vec3 sourceOrigin;
         private final ServerLevel sourceLevel;
-        private final Set<ChunkLoader> transferLoaders = new HashSet<>();
+        private ChunkLoader transferLoader;
         private final float pitch;
         private final float yaw;
-        private final long preparationStartedAt = System.nanoTime();
-        private long exposureStartedAt;
-        private RemoteSceneStartS2C scene;
+        private final RemoteSceneStartS2C scene;
         private String exposureId;
         private long nextAuthorizationRefresh;
         private State state = State.PREPARING;
@@ -169,26 +165,24 @@ public final class RemoteStandPreparation {
             return holder.asHolderEntity() == stand && this.player == player && this.camera == camera;
         }
 
-        /** 非生物胶卷直接就绪。 */
+        /** 非生物胶卷直接就绪，生物胶卷按当前范围更新唯一搜索窗口。 */
         private boolean mobChunksReady() {
             if (remote == null || !MobDimensionFilmCapture.hasMobDimensionFilm(camera)) return true;
-            Set<ChunkLoader> required = new HashSet<>();
             int radius = Math.min((ShuttershadowConfig.mobCaptureRadius() + 15) / 16,
                     McHelper.getPlayerLoadDistance(player));
             BlockPos center = remote.asHolderEntity().blockPosition();
-            required.add(new ChunkLoader(remote.level().dimension(),
-                    center.getX() >> 4, center.getZ() >> 4, radius));
-            for (ChunkLoader loader : required) {
-                if (transferLoaders.add(loader)) {
-                    ChunkLoading.addGlobalChunkLoader(player.getServer(), loader);
+            if (transferLoader == null || !transferLoader.dimension().equals(remote.level().dimension())
+                    || transferLoader.x() != (center.getX() >> 4)
+                    || transferLoader.z() != (center.getZ() >> 4) || transferLoader.radius() != radius) {
+                ChunkLoader replacement = new ChunkLoader(remote.level().dimension(),
+                        center.getX() >> 4, center.getZ() >> 4, radius);
+                ChunkLoading.addGlobalChunkLoader(player.getServer(), replacement);
+                if (transferLoader != null) {
+                    ChunkLoading.removeGlobalChunkLoader(player.getServer(), transferLoader);
                 }
+                transferLoader = replacement;
             }
-            transferLoaders.removeIf(loader -> {
-                if (required.contains(loader)) return false;
-                ChunkLoading.removeGlobalChunkLoader(player.getServer(), loader);
-                return true;
-            });
-            return transferLoaders.stream().allMatch(loader -> loader.isFullyLoaded(player.getServer()));
+            return transferLoader.isFullyLoaded(player.getServer());
         }
 
         /** 红石在源世界按Exposure选玩家。 */
@@ -203,11 +197,11 @@ public final class RemoteStandPreparation {
                     : RemoteCameraSession.syncedCapturePlayers(sequence, players);
         }
 
-        /** 移除本事务所有全局生物搜索loader并清集合。 */
-        private void releaseTransferLoaders() {
-            transferLoaders.forEach(loader ->
-                    ChunkLoading.removeGlobalChunkLoader(player.getServer(), loader));
-            transferLoaders.clear();
+        /** 移除本事务的全局生物搜索窗口并清引用。 */
+        private void releaseTransferLoader() {
+            if (transferLoader == null) return;
+            ChunkLoading.removeGlobalChunkLoader(player.getServer(), transferLoader);
+            transferLoader = null;
         }
     }
 
@@ -250,14 +244,13 @@ public final class RemoteStandPreparation {
                 || pending != null && pending.sourceCapture;
     }
 
-    /** 从服务端实际滤镜解析路由，并确认目标不同于来源。 */
+    /** 从服务端实际滤镜解析不同维度的有效路由。 */
     private static boolean hasDimensionRoute(CameraStandEntity stand, ItemStack camera) {
         if (!(camera.getItem() instanceof CameraItem)) return false;
         ServerLevel source = (ServerLevel) stand.level();
         DimensionFilters.Route route = DimensionFilters.resolve(source.registryAccess(),
                 Attachment.FILTER.get(camera).getForReading(), source.dimension().location());
-        return route != null && route.dimension() != null
-                && !route.dimension().equals(source.dimension().location());
+        return route != null;
     }
 
     /** 按负序号判断照片loader是否仍由支架Pending拥有。 */
@@ -403,9 +396,6 @@ public final class RemoteStandPreparation {
             }
         }
         playCompletionSound(pending);
-        Shuttershadow.LOGGER.info("Remote photo {} committed to film after {} ms preparing and {} ms capturing; completion shutter played.",
-                pending.sequence, (pending.exposureStartedAt - pending.preparationStartedAt) / 1_000_000L,
-                (System.nanoTime() - pending.exposureStartedAt) / 1_000_000L);
     }
 
     /** 依次播放已延后的开/闭声，并运行已缓存的快门关闭动作。 */
@@ -447,7 +437,7 @@ public final class RemoteStandPreparation {
             }
         } finally {
             if (pending.state != State.FINISHING) discardPreparedShutter(pending);
-            pending.releaseTransferLoaders();
+            pending.releaseTransferLoader();
             PENDING.remove(pending.stand.getUUID(), pending);
         }
     }
@@ -474,7 +464,7 @@ public final class RemoteStandPreparation {
     /** 撤销快门和传送loader，手动照片额外关照片订阅。 */
     private static void cancelPrepared(Pending pending) {
         discardPreparedShutter(pending);
-        pending.releaseTransferLoaders();
+        pending.releaseTransferLoader();
         if (!pending.sourceCapture) RemoteCameraSession.close(pending.player, pending.sequence);
         if (pending.player.getServer().getPlayerList().getPlayer(pending.player.getUUID()) == pending.player) {
             PacketDistributor.sendToPlayer(pending.player,
@@ -528,11 +518,8 @@ public final class RemoteStandPreparation {
                     }
                 }
                 if (pending.scene != null) {
-                    pending.scene = pending.scene.withProjectedPlayers(pending.playersInFrame.stream()
-                            .map(ServerPlayer::getUUID).toList());
                     RemoteCameraSession.flushCapture(pending.player);
                 }
-                pending.exposureStartedAt = System.nanoTime();
                 pending.state = State.EXPOSING;
                 invoker.shuttershadow$invokeTakePhoto(pending.stand, pending.player, pending.camera);
                 if (pending.discardImage) {
@@ -542,7 +529,7 @@ public final class RemoteStandPreparation {
                         DimensionFilmCapture.teleportStandPlayersAfterPhoto(
                                 pending.remote, pending.camera, pending.playersInFrame);
                     }
-                    pending.releaseTransferLoaders();
+                    pending.releaseTransferLoader();
                     iterator.remove();
                     continue;
                 }
@@ -570,7 +557,7 @@ public final class RemoteStandPreparation {
         PENDING.values().removeIf(pending -> {
             if (pending.player != player) return false;
             discardPreparedShutter(pending);
-            pending.releaseTransferLoaders();
+            pending.releaseTransferLoader();
             if (!pending.sourceCapture) RemoteCameraSession.close(player, pending.sequence);
             return true;
         });
@@ -582,7 +569,7 @@ public final class RemoteStandPreparation {
         ARMED.clear();
         PENDING.values().forEach(pending -> {
             discardPreparedShutter(pending);
-            pending.releaseTransferLoaders();
+            pending.releaseTransferLoader();
             if (!pending.sourceCapture) RemoteCameraSession.close(pending.player, pending.sequence);
         });
         PENDING.clear();

@@ -38,7 +38,6 @@ public class MixinServerGamePacketListenerImpl_Redirect {
         }
         
         return PacketRedirection.createRedirectedMessage(
-            server,
             PacketRedirection.getForceRedirectDimension(),
             originalPacket
         );

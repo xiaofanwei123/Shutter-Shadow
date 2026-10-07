@@ -4,20 +4,11 @@ package com.xfw.shuttershadow.core;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 
-import java.nio.file.Path;
-
-/** NeoForge平台入口集中桥接：路径、区块事件与物理端。 */
+/** NeoForge平台入口集中桥接：区块事件、物理端与反馈地址。 */
 public class PlatformBridge {
-    /** 取得游戏目录。 */
-    public static Path getGameDir() {
-        return FMLPaths.GAMEDIR.get();
-    }
-
-    
     /** 发布客户端区块加载事件。 */
     public static void postClientChunkLoadEvent(LevelChunk chunk) {
         NeoForge.EVENT_BUS.post(new ChunkEvent.Load(chunk, true));

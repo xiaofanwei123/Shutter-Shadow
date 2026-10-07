@@ -17,7 +17,6 @@ import net.neoforged.neoforge.common.NeoForge;
 import com.xfw.shuttershadow.core.chunk_loading.PerformanceLevel;
 import com.xfw.shuttershadow.access.IERenderSection;
 import com.xfw.shuttershadow.core.ClientPerformanceMonitor;
-import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
 import java.util.ArrayDeque;
 import java.util.Stack;

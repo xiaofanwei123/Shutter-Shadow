@@ -7,6 +7,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LightTexture;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.neoforged.neoforge.common.NeoForge;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,7 +17,6 @@ import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.core.CoreSettings;
@@ -128,35 +130,19 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         }
     }
     
-    // 此处使用重定向，规避 Forge 上 ModifyArgs 的行为问题。
-    /** 按当前相机状态缩放视角摇晃的横向偏移。 */
-    @ModifyArg(
+    /** 远景统一缩放摇晃平移，普通视角原样调用并保留其他模组的包装。 */
+    @WrapOperation(
         method = "bobView",
-        at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V"),
-        index = 0
+        at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V")
     )
-    private float modifyBobViewTranslateX(float f) {
-        return (float) (f * RenderStates.getViewBobbingOffsetMultiplier());
-    }
-    
-    /** 按当前相机状态缩放视角摇晃的竖向偏移。 */
-    @ModifyArg(
-        method = "bobView",
-        at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V"),
-        index = 1
-    )
-    private float modifyBobViewTranslateY(float f) {
-        return (float) (f * RenderStates.getViewBobbingOffsetMultiplier());
-    }
-    
-    /** 按当前相机状态缩放视角摇晃的前后偏移。 */
-    @ModifyArg(
-        method = "bobView",
-        at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V"),
-        index = 2
-    )
-    private float modifyBobViewTranslateZ(float f) {
-        return (float) (f * RenderStates.getViewBobbingOffsetMultiplier());
+    private void shuttershadow$cameraBobbingTranslation(PoseStack poses, float x, float y, float z,
+                                                       Operation<Void> original) {
+        if (!WorldRenderInfo.isRendering()) {
+            original.call(poses, x, y, z);
+            return;
+        }
+        double multiplier = RenderStates.getViewBobbingOffsetMultiplier();
+        original.call(poses, (float) (x * multiplier), (float) (y * multiplier), (float) (z * multiplier));
     }
 
 

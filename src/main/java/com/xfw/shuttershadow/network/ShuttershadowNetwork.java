@@ -12,7 +12,7 @@ import java.util.Arrays;
 /** 相机业务payload注册及客户端隔离调用。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class ShuttershadowNetwork {
-    public static final String PROTOCOL_VERSION = "13";
+    public static final String PROTOCOL_VERSION = "14";
     /** 禁止实例化此工具类。 */
     private ShuttershadowNetwork() {}
 

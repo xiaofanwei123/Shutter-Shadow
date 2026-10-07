@@ -66,11 +66,6 @@ public class MiscNetworking {
             return new DimIdSyncPacket(dimIdToDimTypeIdTag);
         }
         
-        /** 委托createFromServer生成完整映射。 */
-        public static DimIdSyncPacket createPacket(MinecraftServer server) {
-            return DimIdSyncPacket.createFromServer(server);
-        }
-
         /** 返回dimension_id_sync类型。 */
         @Override
         public @NotNull Type<? extends CustomPacketPayload> type() {
