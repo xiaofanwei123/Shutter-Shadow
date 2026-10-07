@@ -1,11 +1,13 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
 
 import com.xfw.shuttershadow.access.IETrackedEntity;
+import com.xfw.shuttershadow.core.chunk_loading.EntitySync;
 import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTracking;
 import com.xfw.shuttershadow.network.PacketRedirection;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerEntity;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerPlayerConnection;
 import net.minecraft.world.entity.Entity;
@@ -46,8 +48,8 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
     @Inject(method = "updatePlayer", at = @At("HEAD"), cancellable = true)
     private void shuttershadow$keepRemoteWatcher(ServerPlayer player, CallbackInfo ci) {
         if (player.level().dimension() != entity.level().dimension()) {
-            if (seenBy.contains(player.connection)) {
-                shuttershadow$additionalWatchers.add(player.connection);
+            if (seenBy.contains(player.connection) && shuttershadow$additionalWatchers.add(player.connection)) {
+                EntitySync.markForUpdate((ServerLevel) entity.level());
             }
             ci.cancel();
             return;
@@ -58,7 +60,9 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
             if (seenBy.add(player.connection)) {
                 serverEntity.addPairing(player);
             }
-            shuttershadow$additionalWatchers.add(player.connection);
+            if (shuttershadow$additionalWatchers.add(player.connection)) {
+                EntitySync.markForUpdate((ServerLevel) entity.level());
+            }
             ci.cancel();
         }
     }
@@ -123,8 +127,8 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
     /** 玩家换维后将旧配对转为相机订阅管理并重新检查可见性。 */
     @Override
     public void ip_onPlayerDimensionChange(ServerPlayer player) {
-        if (seenBy.contains(player.connection)) {
-            shuttershadow$additionalWatchers.add(player.connection);
+        if (seenBy.contains(player.connection) && shuttershadow$additionalWatchers.add(player.connection)) {
+            EntitySync.markForUpdate((ServerLevel) entity.level());
         }
     }
 

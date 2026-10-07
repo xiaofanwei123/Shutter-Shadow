@@ -1,7 +1,6 @@
 package com.xfw.shuttershadow.core.chunk_loading;
 
-
-import com.mojang.logging.LogUtils;
+import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.event.ServerCleanupEvent;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
@@ -20,7 +19,6 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.common.NeoForge;
 import org.apache.commons.lang3.Validate;
-import org.slf4j.Logger;
 import com.xfw.shuttershadow.core.CoreSettings;
 import com.xfw.shuttershadow.access.IEChunkMap;
 import com.xfw.shuttershadow.access.IEWorld;
@@ -35,8 +33,6 @@ import java.util.concurrent.Executor;
 /** 每个ServerLevel的远区块票据和按距离加载节流队列。 */
 @SuppressWarnings("JavadocReference")
 public class RemoteChunkTickets {
-    private static final Logger LOGGER = LogUtils.getLogger();
-    
     public static final TicketType<ChunkPos> TICKET_TYPE =
         TicketType.create("shuttershadow", Comparator.comparingLong(ChunkPos::toLong));
     
@@ -126,13 +122,13 @@ public class RemoteChunkTickets {
     /** 只在有效世界线程和运行中的服务器执行。 */
     public void flushThrottling(ServerLevel world) {
         if (Thread.currentThread() != ((IEWorld) world).portal_getThread()) {
-            LOGGER.error("Called in a non-server-main (or server-world) thread.", new Throwable());
+            Shuttershadow.LOGGER.error("Called in a non-server-main (or server-world) thread.", new Throwable());
             return;
         }
         
         
         if (!isValid) {
-            LOGGER.error("flushing when invalid {}", world);
+            Shuttershadow.LOGGER.error("flushing when invalid {}", world);
             return;
         }
         
@@ -159,7 +155,7 @@ public class RemoteChunkTickets {
             }
             
             if (!resultNow.isSuccess()) {
-                LOGGER.error(
+                Shuttershadow.LOGGER.error(
                     "Chunk loading failure {} {} {}",
                     world, new ChunkPos(chunkPos)
                 );
@@ -183,7 +179,7 @@ public class RemoteChunkTickets {
                         waitingForLoading.add(chunkPos);
                     }
                     else {
-                        LOGGER.warn("Chunk {} is not in the queue", new ChunkPos(chunkPos));
+                        Shuttershadow.LOGGER.warn("Chunk {} is not in the queue", new ChunkPos(chunkPos));
                     }
                 }
             }

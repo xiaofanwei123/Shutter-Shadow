@@ -2,6 +2,7 @@ package com.xfw.shuttershadow;
 
 import com.xfw.shuttershadow.network.DimensionFilmStartS2C;
 import com.xfw.shuttershadow.api.SeamlessTeleportation;
+import com.xfw.shuttershadow.api.CameraDimensionTeleportEvent;
 import com.xfw.shuttershadow.network.RemoteCameraSession;
 import com.xfw.shuttershadow.api.DimensionFilters;
 import io.github.mortuusars.exposure.world.entity.CameraHolder;
@@ -20,6 +21,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -121,15 +123,14 @@ public final class DimensionFilmCapture {
 
         ItemStack filter = Attachment.FILTER.get(camera).getForReading();
         DimensionFilters.Route mapping = DimensionFilters.resolve(
-                player.serverLevel().registryAccess(), filter,
-                player.serverLevel().dimension().location());
+                filter, player.serverLevel().dimension().location());
         if (mapping == null) return false;
 
         ResourceKey<Level> targetKey = ResourceKey.create(Registries.DIMENSION, mapping.dimension());
         ServerLevel target = player.getServer().getLevel(targetKey);
         if (target == null) return false;
 
-        double scale = DimensionFilters.horizontalScale(mapping, player.serverLevel(), target);
+        double scale = DimensionFilters.horizontalScale(player.serverLevel(), target);
         Vec3 targetPosition = DimensionFilters.mapAbsolute(player.position(), scale);
         long transaction = ++nextTransaction;
         SourceSnapshot source = snapshot(player);
@@ -140,7 +141,7 @@ public final class DimensionFilmCapture {
         try {
             // 无缝传送保留玩家实例和相机界面，
             // 只替换客户端世界，避免原版重生和加载界面。
-            teleport(player, targetKey, targetPosition);
+            teleport(player, targetKey, targetPosition, camera);
             PacketDistributor.sendToPlayer(player,
                     new DimensionFilmStartS2C(transaction, targetKey.location()));
             return true;
@@ -178,21 +179,26 @@ public final class DimensionFilmCapture {
                 }
                 // 必须先停止源维度取景会话，避免它在真实传送后重新接管画面。
                 RemoteCameraSession.close(player);
-                teleport(player, remote.level().dimension(), remote.targetPosition(player));
+                teleport(player, remote.level().dimension(), remote.targetPosition(player), camera);
                 // 让客户端先处理 IP 的世界切换，再结束 Exposure 的远程相机状态。
                 RemoteCameraSession.finishDimensionTeleport(player);
             }
         }
     }
 
-    /** 设定短暂传送保护锁，标记显式胶卷传送作用域，在finally移除作用域。 */
-    private static void teleport(ServerPlayer player, ResourceKey<Level> targetKey, Vec3 targetPosition) {
+    /** 执行明确的胶卷传送，成功换维后发布相机传送完成事件。 */
+    private static void teleport(ServerPlayer player, ResourceKey<Level> targetKey, Vec3 targetPosition,
+                                 ItemStack camera) {
+        ResourceKey<Level> sourceDimension = player.level().dimension();
         UUID uuid = player.getUUID();
         PORTAL_TRANSFER_LOCKS.put(uuid, PORTAL_TRANSFER_LOCK_TICKS);
         EXPLICIT_TRANSFERS.add(uuid);
         try {
-            SeamlessTeleportation.teleportPlayer(player,
-                    player.getServer().getLevel(targetKey), targetPosition);
+            if (SeamlessTeleportation.teleportPlayer(player,
+                    player.getServer().getLevel(targetKey), targetPosition) != null
+                    && !sourceDimension.equals(player.level().dimension())) {
+                NeoForge.EVENT_BUS.post(new CameraDimensionTeleportEvent(player, camera, sourceDimension));
+            }
         } finally {
             EXPLICIT_TRANSFERS.remove(uuid);
         }

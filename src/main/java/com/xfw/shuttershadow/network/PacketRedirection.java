@@ -22,8 +22,7 @@ import net.minecraft.world.level.Level;
 import org.apache.commons.lang3.Validate;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.access.IEWorld;
 
 import java.util.ArrayList;
@@ -31,8 +30,6 @@ import java.util.List;
 
 /** 给原版客户端游戏包附加维度，让同一连接同步多个世界。 */
 public class PacketRedirection {
-    private static final Logger LOGGER = LoggerFactory.getLogger(PacketRedirection.class);
-    
     // 次级维度的数据包使用本模组的重定向通道。
     public static final ResourceLocation payloadId =
         ResourceLocation.parse("shuttershadow:redirect");
@@ -43,7 +40,7 @@ public class PacketRedirection {
     /** 校验世界线程，在临时重定向维度中执行并恢复旧值。 */
     public static void withForceRedirect(ServerLevel world, Runnable func) {
         if (((IEWorld) world).portal_getThread() != Thread.currentThread()) {
-            LOGGER.error(
+            Shuttershadow.LOGGER.error(
                 "It's possible that a mod is trying to handle packet in networking thread instead of server thread. This is not thread safe and can cause rare bugs! (Shuttershadow is checking the packet handling thread)",
                 new Throwable()
             );

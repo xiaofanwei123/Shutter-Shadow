@@ -1,9 +1,10 @@
 package com.xfw.shuttershadow.core.chunk_loading;
+
+import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.api.ChunkLoader;
 import com.xfw.shuttershadow.ShuttershadowConfig;
 
 
-import com.mojang.logging.LogUtils;
 import com.xfw.shuttershadow.event.ServerCleanupEvent;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -21,7 +22,6 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
 import com.xfw.shuttershadow.access.IEChunkMap;
 import com.xfw.shuttershadow.mixin.minecraft.server.IEServerCommonPacketListenerImpl;
 import com.xfw.shuttershadow.network.PacketRedirection;
@@ -31,9 +31,6 @@ import java.util.function.Predicate;
 
 /** 额外区块订阅核心。 */
 public class RemoteChunkTracking {
-
-    private static final Logger LOGGER = LogUtils.getLogger();
-
     public static final int updateInterval = 13;
 
     /** 注册每服务端tick更新与ServerCleanup清静态集合。 */
@@ -176,7 +173,7 @@ public class RemoteChunkTracking {
 
             ServerLevel world = server.getLevel(dimension);
             if (world == null) {
-                LOGGER.warn("Dimension not loaded {} in chunk loader {}", dimension, chunkLoader);
+                Shuttershadow.LOGGER.warn("Dimension not loaded {} in chunk loader {}", dimension, chunkLoader);
                 return;
             }
 
@@ -335,7 +332,7 @@ public class RemoteChunkTracking {
             ServerLevel world = server.getLevel(dimension);
 
             if (world == null) {
-                LOGGER.error("Missing dimension in chunk loader {}", dimension.location());
+                Shuttershadow.LOGGER.error("Missing dimension in chunk loader {}", dimension.location());
                 return true;
             }
 
@@ -515,12 +512,8 @@ public class RemoteChunkTracking {
 
     /** 判断该维度是否还有额外观察区块记录。 */
     public static boolean shouldLoadDimension(ResourceKey<Level> dimension) {
-        if (!chunkWatchRecords.containsKey(dimension)) {
-            return false;
-        }
-        var map =
-                chunkWatchRecords.get(dimension);
-        return !map.isEmpty();
+        var map = chunkWatchRecords.get(dimension);
+        return map != null && !map.isEmpty();
     }
 
     /** 添加全局loader并立即标记其全部区块加载需求。 */
@@ -534,7 +527,7 @@ public class RemoteChunkTracking {
         ServerLevel world = server.getLevel(dimension);
 
         if (world == null) {
-            LOGGER.error("Missing dimension in chunk loader {}", dimension.location());
+            Shuttershadow.LOGGER.error("Missing dimension in chunk loader {}", dimension.location());
             return;
         }
 

@@ -1,7 +1,6 @@
 package com.xfw.shuttershadow.core;
 
-
-
+import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.event.ClientExitEvent;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import net.minecraft.client.Camera;
@@ -21,8 +20,6 @@ import net.neoforged.neoforge.common.NeoForge;
 import org.apache.commons.lang3.Validate;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import com.xfw.shuttershadow.access.IEClientPlayNetworkHandler;
 import com.xfw.shuttershadow.access.IEClientWorld;
 import com.xfw.shuttershadow.access.IEMinecraftClient;
@@ -43,8 +40,6 @@ import java.util.function.Supplier;
 @SuppressWarnings("resource")
 // 仅供客户端使用。
 public class ClientWorldLoader {
-    private static final Logger LOGGER = LoggerFactory.getLogger(ClientWorldLoader.class);
-    
     private static final CountDownInt LOG_LIMIT = new CountDownInt(20);
 
     private static final Map<ResourceKey<Level>, ClientLevel> CLIENT_WORLD_MAP =
@@ -96,7 +91,7 @@ public class ClientWorldLoader {
             if (helper.world != CLIENT.level) {
                 if (helper.lightmapTexture == CLIENT.gameRenderer.lightTexture()) {
                     assert CLIENT.level != null;
-                    LOGGER.warn(
+                    Shuttershadow.LOGGER.warn(
                         "Lightmap Texture Conflict {} {}",
                         helper.world.dimension().location(),
                         CLIENT.level.dimension().location()
@@ -128,7 +123,7 @@ public class ClientWorldLoader {
             }
             catch (Throwable e) {
                 if (LOG_LIMIT.tryDecrement()) {
-                    LOGGER.error("", e);
+                    Shuttershadow.LOGGER.error("", e);
                 }
             }
         });
@@ -169,7 +164,7 @@ public class ClientWorldLoader {
         LevelRenderer result = WORLD_RENDERER_MAP.get(dimension);
         
         if (result == null) {
-            LOGGER.warn(
+            Shuttershadow.LOGGER.warn(
                 "Acquiring LevelRenderer before acquiring Level. Something is probably wrong. {}",
                 dimension.location(), new Throwable()
             );
@@ -461,7 +456,7 @@ public class ClientWorldLoader {
         }
         finally {
             if (CLIENT.level != newWorld) {
-                LOGGER.error("Respawn packet should not be redirected");
+                Shuttershadow.LOGGER.error("Respawn packet should not be redirected");
                 originalWorld = CLIENT.level;
                 originalWorldRenderer = CLIENT.levelRenderer;
                 // 混入允许重新赋值当前世界渲染器。
@@ -487,7 +482,7 @@ public class ClientWorldLoader {
         ClientLevel world = getOptionalWorld(dim);
         
         if (world == null) {
-            LOGGER.error(
+            Shuttershadow.LOGGER.error(
                 "Ignoring redirected task of invalid dimension {}", dim.location(), new Throwable()
             );
             return;

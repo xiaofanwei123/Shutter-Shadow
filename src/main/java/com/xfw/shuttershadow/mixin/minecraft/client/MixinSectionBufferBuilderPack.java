@@ -3,12 +3,17 @@ package com.xfw.shuttershadow.mixin.minecraft.client;
 
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.SectionBufferBuilderPack;
+import net.minecraft.client.Minecraft;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import com.xfw.shuttershadow.core.CoreSettings;
+import com.xfw.shuttershadow.core.ClientWorldLoader;
+import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
-/** 按节省内存配置缩小原版区段缓冲包的初始容量。 */
+/** 仅缩小本模组远景资源的初始区段缓冲，普通世界沿用原容量。 */
 @Mixin(SectionBufferBuilderPack.class)
 public class MixinSectionBufferBuilderPack {
     // 缓冲区可以按需扩容。
@@ -18,19 +23,20 @@ public class MixinSectionBufferBuilderPack {
     // 过大的初始缓冲可能耗尽内存。
     // 此注入通过缩小初始容量降低内存占用。
     // 初始容量不能为零，因为扩容发生在写入顶点之后。
-    /** 构造 lambda 的 RenderType.bufferSize 调用：配置关返回原容量。 */
-    @Redirect(
+    /** 保留原容量调用链，仅在渲染线程创建远景资源时按配置减小容量。 */
+    @WrapOperation(
         method = "lambda$new$0",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/RenderType;bufferSize()I"
         )
     )
-    private static int redirectBufferSize(RenderType instance) {
-        if (!CoreSettings.saveMemoryInBufferPack) {
-            return instance.bufferSize();
-        }
-        
-        return Math.min(128, instance.bufferSize());
+    private static int shuttershadow$remoteBufferSize(RenderType instance, Operation<Integer> original) {
+        int size = original.call(instance);
+        if (!CoreSettings.saveMemoryInBufferPack || !RenderSystem.isOnRenderThread()) return size;
+        Minecraft mc = Minecraft.getInstance();
+        boolean remote = ClientWorldLoader.getIsCreatingClientWorld() || WorldRenderInfo.isRendering()
+                || mc.player != null && mc.level != null && mc.level != mc.player.level();
+        return remote ? Math.min(128, size) : size;
     }
 }

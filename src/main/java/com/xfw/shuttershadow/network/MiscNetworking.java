@@ -2,7 +2,7 @@ package com.xfw.shuttershadow.network;
 
 
 import com.google.common.collect.ImmutableMap;
-import com.mojang.logging.LogUtils;
+import com.xfw.shuttershadow.Shuttershadow;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
@@ -18,13 +18,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.dimension.BuiltinDimensionTypes;
 import net.minecraft.world.level.dimension.DimensionType;
 import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
 
 /** 维度类型映射payload容器。 */
 public class MiscNetworking {
-    private static final Logger LOGGER = LogUtils.getLogger();
-    
     /** 发送维度ID→维度类型ID的NBT映射，客户端创建次级ClientLevel必须先有此表。 */
     public static record DimIdSyncPacket(
         CompoundTag dimTypeTag
@@ -50,8 +47,8 @@ public class MiscNetworking {
                 ResourceLocation dimTypeId = dimensionTypes.getKey(dimType);
                 
                 if (dimTypeId == null) {
-                    LOGGER.error("Cannot find dimension type for {}", dimId.location());
-                    LOGGER.error(
+                    Shuttershadow.LOGGER.error("Cannot find dimension type for {}", dimId.location());
+                    Shuttershadow.LOGGER.error(
                         "Registered dimension types {}", dimensionTypes.keySet()
                     );
                     dimTypeId = BuiltinDimensionTypes.OVERWORLD.location();

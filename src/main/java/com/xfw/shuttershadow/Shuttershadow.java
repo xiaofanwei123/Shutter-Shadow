@@ -5,8 +5,8 @@ import com.xfw.shuttershadow.api.DimensionFilters;
 import com.xfw.shuttershadow.core.DimensionRuntime;
 import com.xfw.shuttershadow.core.DimensionRuntimeClient;
 import com.xfw.shuttershadow.core.CoreConfig;
+import com.xfw.shuttershadow.loot.EndShipChestCondition;
 import io.github.mortuusars.exposure.Exposure;
-import net.minecraft.advancements.critereon.ItemSubPredicate;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.IEventBus;
@@ -25,6 +25,8 @@ import net.minecraft.world.item.EnchantedBookItem;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
 import net.minecraft.world.level.Level;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.level.storage.loot.predicates.LootItemConditionType;
 import org.slf4j.Logger;
 
 import java.util.LinkedHashSet;
@@ -40,8 +42,17 @@ public class Shuttershadow {
             DeferredRegister.createDataComponents(Registries.DATA_COMPONENT_TYPE, MODID);
     public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS =
             DeferredRegister.create(Registries.CREATIVE_MODE_TAB, MODID);
-    public static final DeferredRegister<ItemSubPredicate.Type<?>> ITEM_SUB_PREDICATES =
-            DeferredRegister.create(Registries.ITEM_SUB_PREDICATE_TYPE, MODID);
+    public static final DeferredRegister<MobEffect> MOB_EFFECTS =
+            DeferredRegister.create(Registries.MOB_EFFECT, MODID);
+    public static final DeferredRegister<LootItemConditionType> LOOT_CONDITION_TYPES =
+            DeferredRegister.create(Registries.LOOT_CONDITION_TYPE, MODID);
+
+    /** 相机传送后的限时环境伤害保护效果。 */
+    public static final DeferredHolder<MobEffect, CameraTeleportSafetyEffect> SAFE_DIMENSION_TELEPORT_EFFECT =
+            MOB_EFFECTS.register("safe_dimension_teleport", CameraTeleportSafetyEffect::new);
+    /** 将安全传送附魔书限定到末地船宝箱。 */
+    public static final DeferredHolder<LootItemConditionType, LootItemConditionType> END_SHIP_CHEST_CONDITION =
+            LOOT_CONDITION_TYPES.register("end_ship_chest", () -> new LootItemConditionType(EndShipChestCondition.CODEC));
 
     /** 保存各维度滤镜变体的目标维度。 */
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<ResourceLocation>>
@@ -60,11 +71,6 @@ public class Shuttershadow {
     public static final DeferredItem<MobDimensionFilmRollItem> MOB_DIMENSION_FILM = ITEMS.register(
             "mob_dimension_film", () -> new MobDimensionFilmRollItem(new Item.Properties().stacksTo(16)));
 
-    /** 可选的来源维度与坐标比例配置。 */
-    public static final java.util.function.Supplier<ItemSubPredicate.Type<DimensionCameraPredicate>>
-            DIMENSION_CAMERA_PREDICATE = ITEM_SUB_PREDICATES.register(
-                    "camera_dimension", () -> new ItemSubPredicate.Type<>(DimensionCameraPredicate.CODEC));
-
     /** 注册维度滤镜、胶卷与相机附魔书的创造物品栏。 */
     public static final DeferredHolder<CreativeModeTab, CreativeModeTab> CREATIVE_TAB =
             CREATIVE_MODE_TABS.register("camera_filters",
@@ -75,7 +81,7 @@ public class Shuttershadow {
                     .displayItems(Shuttershadow::displayCreativeItems)
                     .build());
 
-    /** 从当前数据包生成去重滤镜变体，并添加胶卷和两本相机附魔书。 */
+    /** 从当前数据包生成去重滤镜变体，并添加胶卷和各级相机附魔书。 */
     private static void displayCreativeItems(CreativeModeTab.ItemDisplayParameters parameters,
                                             CreativeModeTab.Output output) {
         parameters.holders().lookup(Exposure.Registries.FILTER).ifPresent(filters -> {
@@ -91,9 +97,13 @@ public class Shuttershadow {
         output.accept(PLAYER_DIMENSION_FILM);
         output.accept(MOB_DIMENSION_FILM);
         parameters.holders().lookup(Registries.ENCHANTMENT).ifPresent(enchantments -> {
-            for (var key : List.of(CameraEnchantments.EXPOSURE_FAILURE, CameraEnchantments.NARCISSISM)) {
-                enchantments.get(key).ifPresent(holder -> output.accept(
-                        EnchantedBookItem.createForEnchantment(new EnchantmentInstance(holder, 1))));
+            for (var key : List.of(CameraEnchantments.EXPOSURE_FAILURE, CameraEnchantments.NARCISSISM,
+                    CameraEnchantments.SAFE_DIMENSION_TELEPORT)) {
+                enchantments.get(key).ifPresent(holder -> {
+                    for (int level = 1; level <= holder.value().getMaxLevel(); level++) {
+                        output.accept(EnchantedBookItem.createForEnchantment(new EnchantmentInstance(holder, level)));
+                    }
+                });
             }
         });
     }
@@ -109,7 +119,8 @@ public class Shuttershadow {
         ITEMS.register(modEventBus);
         DATA_COMPONENTS.register(modEventBus);
         CREATIVE_MODE_TABS.register(modEventBus);
-        ITEM_SUB_PREDICATES.register(modEventBus);
+        MOB_EFFECTS.register(modEventBus);
+        LOOT_CONDITION_TYPES.register(modEventBus);
 
         // 先注册通用运行时钩子与数据包，
         // 再初始化客户端远维度世界和渲染。

@@ -28,42 +28,20 @@ import com.xfw.shuttershadow.access.IEParticleManager;
 import com.xfw.shuttershadow.access.IEWorldRenderer;
 import com.xfw.shuttershadow.mixin.minecraft.client.IERenderSystem;
 import com.xfw.shuttershadow.mixin.minecraft.client.IESectionRenderDispatcher;
-import com.xfw.shuttershadow.core.render.DimensionRenderHelper;
-import com.xfw.shuttershadow.core.render.FogRendererContext;
-import com.xfw.shuttershadow.core.render.RenderStates;
-import com.xfw.shuttershadow.core.render.WorldRenderInfo;
-
-import java.util.Stack;
+import java.util.ArrayDeque;
 
 // 仅供客户端使用。
 /** 目标世界渲染的状态保存/恢复中心。 */
 public class MyGameRenderer {
     public static final Minecraft client = Minecraft.getInstance();
     
-// 已停用的次级缓冲数量上限。
-    
     // 远程维度与玩家世界使用独立的渲染缓冲存储。
-    private static Stack<RenderBuffers> secondaryRenderBuffers = new Stack<>();
+    private static final ArrayDeque<RenderBuffers> secondaryRenderBuffers = new ArrayDeque<>();
     
     // 原版可见区段发现采用多线程，
     // 跨维度传送后的第一帧可能无法及时得到正确结果，
     // 因此首帧使用内核的同步可见区段算法。
     public static int vanillaTerrainSetupOverride = 0;
-    
-    /** 从缓存池取得或创建临时渲染缓冲。 */
-    private static RenderBuffers acquireRenderBuffersObject() {
-        if (secondaryRenderBuffers.isEmpty()) {
-            return new RenderBuffers(0);
-        }
-        else {
-            return secondaryRenderBuffers.pop();
-        }
-    }
-    
-    /** 将使用完的渲染缓冲放回缓存池。 */
-    private static void returnRenderBuffersObject(RenderBuffers renderBuffers) {
-        secondaryRenderBuffers.push(renderBuffers);
-    }
     
     /** 登记目标渲染任务，完成绘制后恢复渲染任务堆栈。 */
     public static void renderWorldNew(WorldRenderInfo worldRenderInfo) {
@@ -117,9 +95,9 @@ public class MyGameRenderer {
         Matrix4f oldProjectionMatrix = RenderSystem.getProjectionMatrix();
         Matrix4fStack oldModelViewStack = RenderSystem.getModelViewStack();
         
+        Object irisPipeline = IrisInterface.invoker.getPipeline(worldRenderer);
         ObjectArrayList<SectionRenderDispatcher.RenderSection> newChunkInfoList =
             VisibleSectionDiscovery.takeList();
-        Object irisPipeline = IrisInterface.invoker.getPipeline(worldRenderer);
 
         RenderBuffers newRenderBuffers = null;
         Object newSodiumContext = null;
@@ -138,12 +116,13 @@ public class MyGameRenderer {
             client.player.noPhysics = true;
             client.gameRenderer.setRenderHand(false);
 
-            FogRendererContext.swappingManager.pushSwapping(newDimension);
+            FogRendererContext.push(newDimension);
             fogContextSwapped = true;
             ((IEParticleManager) client.particleEngine).ip_setWorld(newWorld);
             ieGameRenderer.ip_setCamera(newCamera);
 
-            newRenderBuffers = acquireRenderBuffersObject();
+            newRenderBuffers = secondaryRenderBuffers.pollLast();
+            if (newRenderBuffers == null) newRenderBuffers = new RenderBuffers(0);
             ((IEWorldRenderer) worldRenderer).ip_setRenderBuffers(newRenderBuffers);
             ((IEMinecraftClient) client).ip_setRenderBuffers(newRenderBuffers);
 
@@ -197,7 +176,7 @@ public class MyGameRenderer {
 
                 ((IEWorldRenderer) worldRenderer).portal_setTransparencyShader(oldTransparencyShader);
 
-                if (fogContextSwapped) FogRendererContext.swappingManager.popSwapping();
+                if (fogContextSwapped) FogRendererContext.pop();
 
                 ((IEWorldRenderer) oldWorldRenderer).portal_setChunkInfoList(oldChunkInfoList);
                 VisibleSectionDiscovery.returnList(newChunkInfoList);
@@ -207,7 +186,7 @@ public class MyGameRenderer {
                 ((IESectionRenderDispatcher) worldRenderer.getSectionRenderDispatcher())
                     .ip_setFixedBuffers(oldSectionRenderDispatcherFixedBuffers);
                 if (newRenderBuffers != null) {
-                    returnRenderBuffersObject(newRenderBuffers);
+                    secondaryRenderBuffers.addLast(newRenderBuffers);
                 }
 
                 ((IEWorldRenderer) worldRenderer).portal_setFrustum(oldFrustum);

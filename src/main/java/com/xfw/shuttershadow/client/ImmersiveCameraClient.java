@@ -41,7 +41,6 @@ import com.xfw.shuttershadow.access.IECamera;
 import com.xfw.shuttershadow.core.render.MyGameRenderer;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
-import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -126,9 +125,19 @@ public final class ImmersiveCameraClient {
         deferredCameraResetTicks = Math.max(deferredCameraResetTicks, 2);
     }
 
-    /** 把Exposure支架相机恢复推迟至少1tick，等真实维度包处理完成。 */
-    public static void deferExposureStandCameraReset() {
+    /** 仅延迟本地维度支架、截图或已跨维的旧支架复位，普通支架交回Exposure。 */
+    public static boolean deferExposureStandCameraReset(Entity cameraEntity) {
+        if (!(cameraEntity instanceof CameraStandEntity stand)) return false;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.getCameraEntity() != stand) return false;
+        boolean remoteStand = session != null && session.cameraStandId() == stand.getId()
+                && session.sourceLevel() == stand.level();
+        if (!remoteStand && screenshotStand != stand && stand.level() == mc.player.level()
+                && !SourceStandCapture.isRenderingSourceScene()
+                && Attachment.FILTER.get(stand.getCamera()).getForReading()
+                        .get(Shuttershadow.DIMENSION_FILTER_TARGET.get()) == null) return false;
         deferredCameraResetTicks = Math.max(deferredCameraResetTicks, 1);
+        return true;
     }
 
     /** 源场截图期间返回null。 */
@@ -140,8 +149,7 @@ public final class ImmersiveCameraClient {
         // 五重前置条件：场景已到达、会话存在且有效、相机激活、取景器与建会话时一致
         if (scene == null || session == null || !session.valid() || !CameraClient.isActive()
                 || CameraClient.viewfinder() != session.viewfinder()
-                || !session.mapping().dimension().equals(scene.dimension())
-                || !Objects.equals(session.mapping(), mappingFor(session.viewfinder()))) return null;
+                || !session.mapping().equals(mappingFor(session.viewfinder()))) return null;
         // 从相机物品读取 Y 偏移；无则 0
         double offset = session.viewfinder().camera()
                 .map((item, stack) -> item.getYPositionOffset(stack)).orElse(0.0D);
@@ -332,7 +340,7 @@ public final class ImmersiveCameraClient {
         int currentStandId = cameraStandId(current);
         if (session != null && (!session.valid() || session.viewfinder() != current
                 || session.cameraStandId() != currentStandId
-                || !Objects.equals(session.mapping(), mapping))) {
+                || !session.mapping().equals(mapping))) {
             close();
         }
         // 无会话但有有效映射 → 开启新会话
@@ -421,17 +429,9 @@ public final class ImmersiveCameraClient {
         if (viewfinder == null || viewfinder.camera() == null) return null;
         // 读取相机上安装的滤镜物品
         ItemStack filter = Attachment.FILTER.get(viewfinder.camera().getItemStack()).getForReading();
-        // 委托给配置层解析（Exposure 谓词优先，本地 JSON 兜底）
-        DimensionFilters.Route entry = DimensionFilters.resolve(
-                Minecraft.getInstance().player.registryAccess(), filter,
-                Minecraft.getInstance().player.level().dimension().location());
-        if (entry != null && Minecraft.getInstance().player.level().dimension().location()
-                .equals(entry.dimension())) {
-            // 维度滤镜按来源路由生效，玩家进入
-            // 滤镜目标维度后使用原生相机视图。
-            return null;
-        }
-        return entry;
+        // 按滤镜组件解析目标维度。
+        return DimensionFilters.resolve(
+                filter, Minecraft.getInstance().player.level().dimension().location());
     }
 
 

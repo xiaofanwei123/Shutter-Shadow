@@ -119,11 +119,6 @@ public final class RemoteStandPreparation {
             film = Attachment.FILM.get(camera).getForReading().copy();
         }
 
-        /** 以invalidReason是否为null表示事务仍有效。 */
-        private boolean valid() {
-            return invalidReason() == null;
-        }
-
         /** 逐项检查支架和摄影师存活/身份、世界、出镜玩家、支架位置、转角以及附件快照。 */
         private String invalidReason() {
             if (stand.isRemoved() || !stand.isAlive()) return "stand removed";
@@ -248,7 +243,7 @@ public final class RemoteStandPreparation {
     private static boolean hasDimensionRoute(CameraStandEntity stand, ItemStack camera) {
         if (!(camera.getItem() instanceof CameraItem)) return false;
         ServerLevel source = (ServerLevel) stand.level();
-        DimensionFilters.Route route = DimensionFilters.resolve(source.registryAccess(),
+        DimensionFilters.Route route = DimensionFilters.resolve(
                 Attachment.FILTER.get(camera).getForReading(), source.dimension().location());
         return route != null;
     }
@@ -427,7 +422,7 @@ public final class RemoteStandPreparation {
         try {
             // 截图后 Exposure 还会处理与上传图片，最后留出一次完整的原生上传窗口。
             if (captured) pending.refreshUploadAuthorization();
-            if (captured && pending.valid()) {
+            if (captured && pending.invalidReason() == null) {
                 pending.state = State.FINISHING;
                 commitFrameAndPlaySound(pending);
                 if (pending.remote != null) {

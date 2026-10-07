@@ -9,7 +9,6 @@ import net.minecraft.client.renderer.chunk.SectionRenderDispatcher.RenderSection
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -19,7 +18,6 @@ import com.xfw.shuttershadow.access.IERenderSection;
 import com.xfw.shuttershadow.core.ClientPerformanceMonitor;
 
 import java.util.ArrayDeque;
-import java.util.Stack;
 
 /** 同步收集相机远景中可见的原版渲染区段。 */
 @OnlyIn(Dist.CLIENT)
@@ -58,64 +56,51 @@ public class VisibleSectionDiscovery {
         vanillaFrustum = vanillaFrustum_;
         resultHolder = resultHolder_;
         
-        resultHolder.clear();
-        tempQueue.clear();
-        
-        updateViewDistance();
-        
-        timeMark = System.nanoTime();
-        
-        Vec3 cameraPos = camera.getPosition();
-        vanillaFrustum.prepare(cameraPos.x, cameraPos.y, cameraPos.z);
-        cameraSectionPos = SectionPos.of(BlockPos.containing(cameraPos));
-        
-        if (cameraPos.y < world.getMinBuildHeight()) {
-            discoverBottomOrTopLayerVisibleChunks(builtChunks.minSectionY);
+        try {
+            resultHolder.clear();
+            tempQueue.clear();
+
+            int distance = WorldRenderInfo.getRenderDistance();
+            viewDistance = PerformanceLevel.getCameraRenderDistance(ClientPerformanceMonitor.level, distance);
+
+            timeMark = System.nanoTime();
+
+            Vec3 cameraPos = camera.getPosition();
+            vanillaFrustum.prepare(cameraPos.x, cameraPos.y, cameraPos.z);
+            cameraSectionPos = SectionPos.of(BlockPos.containing(cameraPos));
+
+            if (cameraPos.y < world.getMinBuildHeight()) {
+                discoverBottomOrTopLayerVisibleChunks(builtChunks.minSectionY);
+            }
+            else if (cameraPos.y > world.getMaxBuildHeight()) {
+                discoverBottomOrTopLayerVisibleChunks(builtChunks.endSectionY - 1);
+            }
+            else {
+                checkSection(
+                    cameraSectionPos.x(),
+                    cameraSectionPos.y(),
+                    cameraSectionPos.z(),
+                    true
+                );
+            }
+
+            // 广度优先搜索可见区段。
+            while (!tempQueue.isEmpty()) {
+                RenderSection curr = tempQueue.poll();
+                int cx = SectionPos.blockToSectionCoord(curr.getOrigin().getX());
+                int cy = SectionPos.blockToSectionCoord(curr.getOrigin().getY());
+                int cz = SectionPos.blockToSectionCoord(curr.getOrigin().getZ());
+
+                checkSection(cx + 1, cy, cz, false);
+                checkSection(cx - 1, cy, cz, false);
+                checkSection(cx, cy + 1, cz, false);
+                checkSection(cx, cy - 1, cz, false);
+                checkSection(cx, cy, cz + 1, false);
+                checkSection(cx, cy, cz - 1, false);
+            }
+        } finally {
+            resetDiscovery();
         }
-        else if (cameraPos.y > world.getMaxBuildHeight()) {
-            discoverBottomOrTopLayerVisibleChunks(builtChunks.endSectionY - 1);
-        }
-        else {
-            checkSection(
-                cameraSectionPos.x(),
-                cameraSectionPos.y(),
-                cameraSectionPos.z(),
-                true
-            );
-        }
-        
-        // 广度优先搜索可见区段。
-        while (!tempQueue.isEmpty()) {
-            RenderSection curr = tempQueue.poll();
-            int cx = SectionPos.blockToSectionCoord(curr.getOrigin().getX());
-            int cy = SectionPos.blockToSectionCoord(curr.getOrigin().getY());
-            int cz = SectionPos.blockToSectionCoord(curr.getOrigin().getZ());
-            
-            checkSection(cx + 1, cy, cz, false);
-            checkSection(cx - 1, cy, cz, false);
-            checkSection(cx, cy + 1, cz, false);
-            checkSection(cx, cy - 1, cz, false);
-            checkSection(cx, cy, cz + 1, false);
-            checkSection(cx, cy, cz - 1, false);
-        }
-        
-        // 清空临时引用，避免对象长期滞留。
-        resultHolder = null;
-        builtChunks = null;
-        vanillaFrustum = null;
-    }
-    
-    /** 根据当前任务视距和性能档位计算有效渲染距离。 */
-    private static void updateViewDistance() {
-        int distance = WorldRenderInfo.getRenderDistance();
-        viewDistance = PerformanceLevel.getCameraRenderDistance(ClientPerformanceMonitor.level, distance);
-    }
-    
-    // 原版视锥剔除可能错误剔除搜索起始区段。
-    /** 根据区段包围盒判断是否位于视锥内。 */
-    private static boolean isVisible(RenderSection builtChunk) {
-        AABB box = builtChunk.getBoundingBox();
-        return vanillaFrustum.isVisible(box);
     }
     
     /** 镜头超出世界高度时，从最近的顶部或底部区段开始搜索。 */
@@ -158,7 +143,7 @@ public class VisibleSectionDiscovery {
             IERenderSection ieRenderSection = (IERenderSection) builtChunk;
             if (ieRenderSection.portal_getMark() != timeMark) {
                 ieRenderSection.portal_setMark(timeMark);// 标记此区段已检查。
-                if (skipFrustumTest || isVisible(builtChunk)) {
+                if (skipFrustumTest || vanillaFrustum.isVisible(builtChunk.getBoundingBox())) {
                     tempQueue.add(builtChunk);
                     resultHolder.add(builtChunk);
                 }
@@ -166,22 +151,18 @@ public class VisibleSectionDiscovery {
         }
     }
     
-    private static final Stack<ObjectArrayList<RenderSection>> listCaches = new Stack<>();
+    private static final ArrayDeque<ObjectArrayList<RenderSection>> listCaches = new ArrayDeque<>();
     
     /** 从缓存池取得或创建空的区段列表。 */
     public static ObjectArrayList<RenderSection> takeList() {
-        if (listCaches.isEmpty()) {
-            return new ObjectArrayList<>();
-        }
-        else {
-            return listCaches.pop();
-        }
+        ObjectArrayList<RenderSection> list = listCaches.pollLast();
+        return list == null ? new ObjectArrayList<>() : list;
     }
     
     /** 清空使用过的列表并回池。 */
     public static void returnList(ObjectArrayList<RenderSection> list) {
         list.clear();// 清空临时引用，避免对象长期滞留。
-        listCaches.push(list);
+        listCaches.addLast(list);
     }
     
     /** 注册客户端清理时释放列表缓存的回调。 */
@@ -193,9 +174,16 @@ public class VisibleSectionDiscovery {
     /** 清列表池与遍历临时对象引用。 */
     private static void cleanUp() {
         listCaches.clear();
+        resetDiscovery();
+    }
+
+    /** 清空遍历临时引用，失败和退出世界时也能释放区段。 */
+    private static void resetDiscovery() {
+        tempQueue.clear();
         resultHolder = null;
         builtChunks = null;
         vanillaFrustum = null;
+        cameraSectionPos = null;
     }
     
 }

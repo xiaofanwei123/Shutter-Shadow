@@ -1,7 +1,6 @@
 package com.xfw.shuttershadow.core.teleportation;
 
-
-import com.mojang.logging.LogUtils;
+import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.DimensionFilmCapture;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -13,7 +12,6 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.apache.commons.lang3.Validate;
-import org.slf4j.Logger;
 import com.xfw.shuttershadow.core.ServerRuntimeState;
 import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTracking;
@@ -28,8 +26,6 @@ import java.util.Set;
 
 /** 执行各服务器的玩家、普通实体及骑乘载具传送。 */
 public class ServerTeleportationManager {
-    private static final Logger LOGGER = LogUtils.getLogger();
-
     private final Set<Entity> teleportingEntities = new HashSet<>();
 
     /** 取得服务器独立管理器。 */
@@ -40,14 +36,9 @@ public class ServerTeleportationManager {
     /** 注册每游戏刻清理传送标记的回调。 */
     public static void init() {
         NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class, event -> {
-            of(event.getServer()).tick(event.getServer());
+            of(event.getServer()).teleportingEntities.clear();
         });
 
-    }
-
-    /** 清理本游戏刻的传送标记。 */
-    private void tick(MinecraftServer server) {
-        teleportingEntities.clear();
     }
 
     /** 默认发送位置包的玩家传送重载。 */
@@ -75,7 +66,7 @@ public class ServerTeleportationManager {
         ServerLevel toWorld = player.server.getLevel(dimensionTo);
 
         if (toWorld == null) {
-            LOGGER.error(
+            Shuttershadow.LOGGER.error(
                 "Cannot teleport player {} to non-existing dimension {}",
                 player, dimensionTo.location()
             );
@@ -173,7 +164,7 @@ public class ServerTeleportationManager {
         Vec3 newEyePos
     ) {
         if (entity.getRemovalReason() != null) {
-            LOGGER.error("Trying to teleport a removed entity {}", entity, new Throwable());
+            Shuttershadow.LOGGER.error("Trying to teleport a removed entity {}", entity, new Throwable());
             return entity;
         }
         
@@ -183,7 +174,7 @@ public class ServerTeleportationManager {
         ServerLevel toWorld = server.getLevel(toDimension);
 
         if (toWorld == null) {
-            LOGGER.error(
+            Shuttershadow.LOGGER.error(
                 "Invalid dest dimension {} to teleport entity {} to",
                 toDimension.location(), entity
             );

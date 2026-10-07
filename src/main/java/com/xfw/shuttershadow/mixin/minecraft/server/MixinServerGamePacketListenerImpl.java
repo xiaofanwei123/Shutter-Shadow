@@ -2,7 +2,10 @@ package com.xfw.shuttershadow.mixin.minecraft.server;
 
 
 import com.xfw.shuttershadow.Shuttershadow;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
@@ -11,14 +14,11 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.RelativeMovement;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -27,10 +27,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.xfw.shuttershadow.access.IEPlayerMoveC2SPacket;
 import com.xfw.shuttershadow.access.IEPlayerPositionLookS2CPacket;
 import com.xfw.shuttershadow.util.ServerTaskList;
-import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
 import com.xfw.shuttershadow.core.teleportation.ServerTeleportationManager;
-
-import java.util.Set;
 
 /** 同步玩家移动和传送确认的维度，避免旧位置包污染新世界。 */
 @Mixin(value = ServerGamePacketListenerImpl.class, priority = 900)
@@ -39,16 +36,6 @@ public abstract class MixinServerGamePacketListenerImpl {
     public ServerPlayer player;
     @Shadow
     private Vec3 awaitingPositionFromClient;
-    @Shadow
-    private int awaitingTeleport;
-    @Shadow
-    private int awaitingTeleportTime;
-    @Shadow
-    private int tickCount;
-
-    /** Shadow 引用原 getPlayer，保留原连接玩家查询声明。 */
-    @Shadow
-    public abstract ServerPlayer getPlayer();
     
     
     @Unique
@@ -103,51 +90,35 @@ public abstract class MixinServerGamePacketListenerImpl {
         }
     }
     
-    /**
-     * 更新待确认位置及维度，并发送扩展位置同步包。
-     * @author qouteall
-     * @reason 为原版位置同步包附加维度信息及传送确认处理。
-     */
-    @Overwrite
-    @VanillaRuntimeHooks
-    public void teleport(
-        double x, double y, double z, float yaw, float pitch,
-        Set<RelativeMovement> relativeAttrs
-    ) {
-        // 重生期间玩家可能已标记移除，仍有传送请求到达。
-        
+    /** 阻止已移除玩家继续发送位置同步。 */
+    @Inject(method = "teleport(DDDFFLjava/util/Set;)V", at = @At("HEAD"), cancellable = true)
+    private void shuttershadow$guardRemovedPlayer(CallbackInfo ci) {
         if (player.getRemovalReason() != null) {
             Shuttershadow.LOGGER.error(
                 "[shuttershadow] Tries to send player pos packet to a removed player {}",
                 player, new Throwable()
             );
-            return;
+            ci.cancel();
         }
-        
-        
-        double xBase = relativeAttrs.contains(RelativeMovement.X) ? this.player.getX() : 0.0;
-        double yBase = relativeAttrs.contains(RelativeMovement.Y) ? this.player.getY() : 0.0;
-        double zBase = relativeAttrs.contains(RelativeMovement.Z) ? this.player.getZ() : 0.0;
-        float yRotBase = relativeAttrs.contains(RelativeMovement.Y_ROT) ? this.player.getYRot() : 0.0f;
-        float xRotBase = relativeAttrs.contains(RelativeMovement.X_ROT) ? this.player.getXRot() : 0.0f;
-        
-        this.awaitingPositionFromClient = new Vec3(x, y, z);
+    }
+
+    /** 原版保存待确认坐标后立即记录维度，保持位置更新前的同步时点。 */
+    @Inject(method = "teleport(DDDFFLjava/util/Set;)V", at = @At(value = "FIELD",
+            target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;awaitingPositionFromClient:Lnet/minecraft/world/phys/Vec3;",
+            opcode = Opcodes.PUTFIELD, shift = At.Shift.AFTER))
+    private void shuttershadow$recordAwaitingDimension(CallbackInfo ci) {
         this.ip_dimOfAwaitingPosition = player.level().dimension();
-        if (++this.awaitingTeleport == Integer.MAX_VALUE) {
-            this.awaitingTeleport = 0;
+    }
+
+    /** 为原版位置包补充维度，并沿原发送调用链处理。 */
+    @WrapOperation(method = "teleport(DDDFFLjava/util/Set;)V", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;send(Lnet/minecraft/network/protocol/Packet;)V"))
+    private void shuttershadow$sendDimensionPosition(ServerGamePacketListenerImpl connection,
+            Packet<?> packet, Operation<Void> original) {
+        if (packet instanceof ClientboundPlayerPositionPacket positionPacket) {
+            ((IEPlayerPositionLookS2CPacket) positionPacket).ip_setPlayerDimension(player.level().dimension());
         }
-        
-        this.awaitingTeleportTime = this.tickCount;
-        this.player.absMoveTo(x, y, z, yaw, pitch);
-        ClientboundPlayerPositionPacket lookPacket = new ClientboundPlayerPositionPacket(
-            x - xBase, y - yBase, z - zBase,
-            yaw - yRotBase, pitch - xRotBase,
-            relativeAttrs, this.awaitingTeleport
-        );
-        
-        ((IEPlayerPositionLookS2CPacket) lookPacket).ip_setPlayerDimension(player.level().dimension());
-        
-        this.player.connection.send(lookPacket);
+        original.call(connection, packet);
     }
 
     // 若待确认位置属于其它维度，则将玩家同步到该维度。

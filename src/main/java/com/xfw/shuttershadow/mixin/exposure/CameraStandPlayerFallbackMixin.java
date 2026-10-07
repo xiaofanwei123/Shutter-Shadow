@@ -46,7 +46,6 @@ public abstract class CameraStandPlayerFallbackMixin {
         ItemStack filter = Attachment.FILTER.get(camera).getForReading();
         if (filter.isEmpty()) return;
         DimensionFilters.Route mapping = DimensionFilters.resolve(
-                ((net.minecraft.server.level.ServerLevel) stand.level()).registryAccess(),
                 filter, stand.level().dimension().location());
         if (mapping == null || mapping.dimension() == null) return;
         ResourceKey<Level> target = ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,

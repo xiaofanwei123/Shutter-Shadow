@@ -3,11 +3,14 @@ package com.xfw.shuttershadow.data;
 import com.google.gson.JsonParser;
 import com.xfw.shuttershadow.CameraEnchantments;
 import com.xfw.shuttershadow.Shuttershadow;
+import com.xfw.shuttershadow.loot.EndShipChestCondition;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.RegistrySetBuilder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.data.PackOutput;
+import net.minecraft.data.loot.LootTableProvider;
+import net.minecraft.data.loot.LootTableSubProvider;
 import net.minecraft.data.tags.EnchantmentTagsProvider;
 import net.minecraft.data.worldgen.BootstrapContext;
 import net.minecraft.resources.ResourceKey;
@@ -15,11 +18,25 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.EnchantmentTags;
 import net.minecraft.world.entity.EquipmentSlotGroup;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.level.storage.loot.BuiltInLootTables;
+import net.minecraft.world.level.storage.loot.LootPool;
+import net.minecraft.world.level.storage.loot.LootTable;
+import net.minecraft.world.level.storage.loot.entries.LootItem;
+import net.minecraft.world.level.storage.loot.functions.SetEnchantmentsFunction;
+import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
+import net.minecraft.world.level.storage.loot.predicates.LootItemCondition;
+import net.minecraft.world.level.storage.loot.predicates.LootItemRandomChanceCondition;
+import net.minecraft.world.level.storage.loot.providers.number.ConstantValue;
+import net.minecraft.world.level.storage.loot.providers.number.UniformGenerator;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.common.data.ExistingFileHelper;
+import net.neoforged.neoforge.common.data.GlobalLootModifierProvider;
 import net.neoforged.neoforge.common.data.LanguageProvider;
+import net.neoforged.neoforge.common.loot.AddTableLootModifier;
+import net.neoforged.neoforge.common.loot.LootTableIdCondition;
 import net.neoforged.neoforge.data.event.GatherDataEvent;
 
 import java.io.IOException;
@@ -28,18 +45,29 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
 
 /** 数据生成入口，不在游戏运行时生成配置资源。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class CameraEnchantmentData {
-    /** includeServer时生成附魔registry JSON和tags，includeClient时生成en_us/zh_cn。 */
+    private static final ResourceKey<LootTable> NETHER_CAMERA_BOOKS = ResourceKey.create(Registries.LOOT_TABLE,
+            ResourceLocation.fromNamespaceAndPath(Shuttershadow.MODID, "chests/nether_camera_books"));
+    private static final ResourceKey<LootTable> END_CAMERA_BOOKS = ResourceKey.create(Registries.LOOT_TABLE,
+            ResourceLocation.fromNamespaceAndPath(Shuttershadow.MODID, "chests/end_camera_books"));
+
+    /** 按生成选项输出附魔、标签、宝箱追加战利品及中英文语言。 */
     @SubscribeEvent
     public static void gatherData(GatherDataEvent event) {
         if (event.includeServer()) {
             event.createDatapackRegistryObjects(
                     new RegistrySetBuilder().add(Registries.ENCHANTMENT, CameraEnchantmentData::bootstrap));
             event.createProvider((output, lookup) -> new Tags(output, lookup, event.getExistingFileHelper()));
+            event.createProvider((output, lookup) -> new LootTableProvider(output,
+                    Set.of(NETHER_CAMERA_BOOKS, END_CAMERA_BOOKS),
+                    List.of(new LootTableProvider.SubProviderEntry(Books::new, LootContextParamSets.CHEST)), lookup));
+            event.createProvider(ChestModifiers::new);
         }
         if (event.includeClient()) {
             event.createProvider(output -> new Languages(output, "en_us"));
@@ -47,7 +75,7 @@ public final class CameraEnchantmentData {
         }
     }
 
-    /** 以Exposure camera作为支持物品集合，注册两种等级1的负面附魔定义。 */
+    /** 注册仅支持照相机的两种一级诅咒和三级安全传送附魔。 */
     private static void bootstrap(BootstrapContext<Enchantment> context) {
         HolderSet<Item> cameras = HolderSet.direct(context.lookup(Registries.ITEM).getOrThrow(
                 ResourceKey.create(Registries.ITEM, ResourceLocation.fromNamespaceAndPath("exposure", "camera"))));
@@ -56,23 +84,68 @@ public final class CameraEnchantmentData {
                     cameras, 1, 1, Enchantment.constantCost(25), Enchantment.constantCost(50),
                     8, EquipmentSlotGroup.ANY)).build(key.location()));
         }
+        ResourceKey<Enchantment> safety = CameraEnchantments.SAFE_DIMENSION_TELEPORT;
+        context.register(safety, Enchantment.enchantment(Enchantment.definition(
+                cameras, 1, 3, Enchantment.dynamicCost(25, 10), Enchantment.dynamicCost(50, 10),
+                8, EquipmentSlotGroup.ANY)).build(safety.location()));
     }
 
-    /** 两附魔标签provider。 */
+    /** 生成相机附魔的诅咒、宝藏与提示排序标签。 */
     private static final class Tags extends EnchantmentTagsProvider {
         /** 传output、lookup、本命名空间及existing file helper给父类。 */
         private Tags(PackOutput output, CompletableFuture<HolderLookup.Provider> lookup, ExistingFileHelper files) {
             super(output, lookup, Shuttershadow.MODID, files);
         }
 
-        /** 把两附魔加入curse、treasure、tradeable及tooltip_order。 */
+        /** 三附魔均为宝藏，仅旧两附魔为诅咒；不加入交易或随机附魔标签。 */
         @Override
         protected void addTags(HolderLookup.Provider provider) {
-            // 村民出售附魔书；诅咒可在铁砧附上，也不会被砂轮洗掉。
-            for (var tag : List.of(EnchantmentTags.CURSE, EnchantmentTags.TREASURE,
-                    EnchantmentTags.TRADEABLE, EnchantmentTags.TOOLTIP_ORDER)) {
-                tag(tag).add(CameraEnchantments.EXPOSURE_FAILURE, CameraEnchantments.NARCISSISM);
+            tag(EnchantmentTags.CURSE).add(CameraEnchantments.EXPOSURE_FAILURE, CameraEnchantments.NARCISSISM);
+            for (var tag : List.of(EnchantmentTags.TREASURE, EnchantmentTags.TOOLTIP_ORDER)) {
+                tag(tag).add(CameraEnchantments.EXPOSURE_FAILURE, CameraEnchantments.NARCISSISM,
+                        CameraEnchantments.SAFE_DIMENSION_TELEPORT);
             }
+        }
+    }
+
+    /** 生成两张追加战利品表，不替换原版宝箱内容。 */
+    private record Books(HolderLookup.Provider registries) implements LootTableSubProvider {
+        /** 宝箱有三成概率追加一本相机附魔书，诅咒或安全传送等级均等概率。 */
+        @Override
+        public void generate(BiConsumer<ResourceKey<LootTable>, LootTable.Builder> output) {
+            var enchantments = registries.lookupOrThrow(Registries.ENCHANTMENT);
+            LootPool.Builder curses = LootPool.lootPool().setRolls(ConstantValue.exactly(1))
+                    .when(LootItemRandomChanceCondition.randomChance(0.3F));
+            for (var key : List.of(CameraEnchantments.EXPOSURE_FAILURE, CameraEnchantments.NARCISSISM)) {
+                curses.add(LootItem.lootTableItem(Items.BOOK).apply(new SetEnchantmentsFunction.Builder()
+                        .withEnchantment(enchantments.getOrThrow(key), ConstantValue.exactly(1))));
+            }
+            output.accept(NETHER_CAMERA_BOOKS, LootTable.lootTable().withPool(curses));
+            output.accept(END_CAMERA_BOOKS, LootTable.lootTable().withPool(LootPool.lootPool()
+                    .setRolls(ConstantValue.exactly(1)).when(LootItemRandomChanceCondition.randomChance(0.3F))
+                    .add(LootItem.lootTableItem(Items.BOOK).apply(new SetEnchantmentsFunction.Builder()
+                            .withEnchantment(enchantments.getOrThrow(CameraEnchantments.SAFE_DIMENSION_TELEPORT),
+                                    UniformGenerator.between(1, 3))))));
+        }
+    }
+
+    /** 使用内置追加表修饰器，将相机附魔书放入指定原版宝箱。 */
+    private static final class ChestModifiers extends GlobalLootModifierProvider {
+        /** 将输出目录与附魔注册表传给内置战利品修饰器生成器。 */
+        private ChestModifiers(PackOutput output, CompletableFuture<HolderLookup.Provider> lookup) {
+            super(output, lookup, Shuttershadow.MODID);
+        }
+
+        /** 旧诅咒来自下界要塞，安全传送限定在末地船宝箱。 */
+        @Override
+        protected void start() {
+            add("nether_camera_books", new AddTableLootModifier(new LootItemCondition[]{
+                    LootTableIdCondition.builder(BuiltInLootTables.NETHER_BRIDGE.location()).build()
+            }, NETHER_CAMERA_BOOKS));
+            add("end_camera_books", new AddTableLootModifier(new LootItemCondition[]{
+                    LootTableIdCondition.builder(BuiltInLootTables.END_CITY_TREASURE.location()).build(),
+                    new EndShipChestCondition()
+            }, END_CAMERA_BOOKS));
         }
     }
 
@@ -89,14 +162,17 @@ public final class CameraEnchantmentData {
             chinese = locale.equals("zh_cn");
         }
 
-        /** 读现有语言保留其他键，重写两附魔、所有配置标题/tooltip和tps反馈。 */
+        /** 保留其他语言键，重写相机附魔、效果、配置与命令翻译。 */
         @Override
         protected void addTranslations() {
             String failure = "enchantment.shuttershadow.exposure_failure";
             String narcissism = "enchantment.shuttershadow.narcissism";
+            String safety = "enchantment.shuttershadow.safe_dimension_teleport";
+            String safetyEffect = "effect.shuttershadow.safe_dimension_teleport";
             try (var reader = Files.newBufferedReader(source, StandardCharsets.UTF_8)) {
                 for (var entry : JsonParser.parseReader(reader).getAsJsonObject().entrySet()) {
                     if (!entry.getKey().equals(failure) && !entry.getKey().equals(narcissism)
+                            && !entry.getKey().equals(safety) && !entry.getKey().equals(safetyEffect)
                             && !entry.getKey().equals("shuttershadow.core.warning_config_hint")
                             && !entry.getKey().startsWith("shuttershadow.configuration.")
                             && !entry.getKey().startsWith("commands.shuttershadow.tps.")) {
@@ -106,8 +182,10 @@ public final class CameraEnchantmentData {
             } catch (IOException exception) {
                 throw new UncheckedIOException("Cannot read existing camera translations: " + source, exception);
             }
-            add(failure, chinese ? "曝光失效" : "Exposure Failure");
-            add(narcissism, chinese ? "自恋狂" : "Narcissism");
+            add(failure, chinese ? "曝光失效-相机" : "Exposure Failure - Camera");
+            add(narcissism, chinese ? "自恋狂-相机" : "Narcissism - Camera");
+            add(safety, chinese ? "安全传送维度-相机" : "Safe Dimension Teleport - Camera");
+            add(safetyEffect, chinese ? "安全传送维度" : "Safe Dimension Teleport");
             add("shuttershadow.configuration.title", chinese ? "%s 配置" : "%s Configuration");
             addConfigOption("dimension_camera", "维度相机", "Dimension Camera",
                     "服务端统一限制手持和手动支架相机的目标维度取景距离。单位为区块，与生物获取范围的方块单位不同。",

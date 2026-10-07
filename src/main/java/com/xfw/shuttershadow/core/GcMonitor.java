@@ -1,13 +1,11 @@
 package com.xfw.shuttershadow.core;
 
-
-import com.mojang.logging.LogUtils;
+import com.xfw.shuttershadow.Shuttershadow;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
-import org.slf4j.Logger;
 import com.xfw.shuttershadow.util.CHelper;
 import com.xfw.shuttershadow.core.CoreSettings;
 import com.xfw.shuttershadow.core.CoreConfig;
@@ -34,8 +32,6 @@ public class GcMonitor {
     
     private static final WeakHashMap<GarbageCollectorMXBean, Long> lastCollectCount =
         new WeakHashMap<>();
-    
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final CountDownInt MESSAGE_LIMIT = new CountDownInt(3);
     private static final CountDownInt LOG_LIMIT = new CountDownInt(3);
@@ -130,7 +126,7 @@ public class GcMonitor {
             if (LOG_LIMIT.tryDecrement()) {
                 // 使用 ZGC 时，内存占用的下降存在延迟。
                 
-                LOGGER.warn(String.format(
+                Shuttershadow.LOGGER.warn(String.format(
                     """
                     Memory seems not enough. Try to Shrink loading distance or allocate more memory.
                     Memory: % 2d%% %03d/%03dMB
@@ -141,7 +137,7 @@ public class GcMonitor {
                 ));
 
                 if (LOG_LIMIT.isZero()) {
-                    LOGGER.info("Memory warning logging reached limit.");
+                    Shuttershadow.LOGGER.info("Memory warning logging reached limit.");
                 }
             }
             

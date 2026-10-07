@@ -1,40 +1,36 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
 
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
+import com.xfw.shuttershadow.core.teleportation.ServerTeleportationManager;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
-import it.unimi.dsi.fastutil.objects.ObjectSet;
-import net.minecraft.core.SectionPos;
-import net.minecraft.server.level.*;
-import org.spongepowered.asm.mixin.Final;
+import net.minecraft.server.level.ChunkMap;
+import net.minecraft.server.level.DistanceManager;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTickets;
 import com.xfw.shuttershadow.access.IEChunkMap;
 import com.xfw.shuttershadow.ShuttershadowConfig;
 
-/** 修复玩家移除时的空集合，并分批刷新相机加载票据。 */
+/** 保护本模组无缝移交的玩家票据清理，并分批刷新相机加载票据。 */
 @Mixin(DistanceManager.class)
 public abstract class MixinDistanceManager {
-    
-    @Shadow
-    @Final
-    private Long2ObjectMap<ObjectSet<ServerPlayer>> playersPerChunk;
-    
-    // 避免空引用。
-    /** 确保原版移除玩家时对应区块追踪集合存在，避免空引用。 */
-    @Inject(method = "Lnet/minecraft/server/level/DistanceManager;removePlayer(Lnet/minecraft/core/SectionPos;Lnet/minecraft/server/level/ServerPlayer;)V", at = @At("HEAD"))
-    private void onHandleChunkLeave(
-        SectionPos sectionPos,
-        ServerPlayer serverPlayer,
-        CallbackInfo ci
-    ) {
-        long chunkPos = sectionPos.chunk().toLong();
-        playersPerChunk.computeIfAbsent(chunkPos, k -> new ObjectOpenHashSet<>());
+
+    /** 仅无缝移交缺少原集合时补空集合，继续原版清理但不写入地图。 */
+    @WrapOperation(method = "removePlayer", at = @At(value = "INVOKE", target =
+            "Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;get(J)Ljava/lang/Object;", remap = false))
+    private Object shuttershadow$readLeavingPlayers(Long2ObjectMap<?> players, long chunkPos,
+            Operation<Object> original, @Local(argsOnly = true) ServerPlayer player) {
+        Object result = original.call(players, chunkPos);
+        return result == null && ServerTeleportationManager.of(player.getServer()).isTeleporting(player)
+                ? new ObjectOpenHashSet<ServerPlayer>() : result;
     }
     
     /** 分批提交相机额外区块票据，优先加载近处区块。 */

@@ -1,8 +1,9 @@
 package com.xfw.shuttershadow.core.chunk_loading;
+
+import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.api.ChunkLoader;
 
 
-import com.mojang.logging.LogUtils;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import net.minecraft.network.protocol.game.ClientboundChunkBatchFinishedPacket;
@@ -23,7 +24,6 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.event.EventHooks;
 import org.apache.commons.lang3.Validate;
 import org.apache.commons.lang3.mutable.MutableInt;
-import org.slf4j.Logger;
 import com.xfw.shuttershadow.access.IEChunkMap;
 import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
 import com.xfw.shuttershadow.network.PacketRedirection;
@@ -35,9 +35,6 @@ import java.util.Set;
 /** 保存各玩家的额外区块加载器、可见维度和远程区块发送队列。 */
 @SuppressWarnings({"JavadocReference", "UnstableApiUsage"})
 public class PlayerChunkLoading {
-    
-    private static final Logger LOGGER = LogUtils.getLogger();
-    
     /** 每次更新玩家加载信息时清空并重新计算可见维度。 */
     public final Set<ResourceKey<Level>> visibleDimensions = new ObjectOpenHashSet<>();
     
@@ -125,7 +122,7 @@ public class PlayerChunkLoading {
                 
                 ServerLevel world = server.getLevel(record.dimension);
                 if (world == null) {
-                    LOGGER.error(
+                    Shuttershadow.LOGGER.error(
                         "Missing dimension when flushing pending loading {}",
                         record.dimension.location()
                     );

@@ -51,22 +51,14 @@ public final class RemoteCameraSession {
             ChunkLoading.removeChunkLoaderForPlayer(owner, loader);
         }
 
-        /** 摄影师死亡、替换/离线，或来源/目标世界消失时标记不可用。 */
-        boolean unavailable() {
-            return owner.isRemoved() || !owner.isAlive()
+        /** 摄影师/世界不可用或照片订阅超期时释放，供removeIf移除。 */
+        boolean releaseIfExpired(long lifetimeTicks) {
+            boolean expired = owner.isRemoved() || !owner.isAlive()
                     || owner.getServer().getPlayerList().getPlayer(owner.getUUID()) != owner
                     || owner.getServer().getLevel(loader.dimension()) == null
-                    || owner.getServer().getLevel(sourceDimension) == null;
-        }
-
-        /** 不可用或主世界gameTime距离登记tick达到寿命时判过期。 */
-        boolean expired(long lifetimeTicks) {
-            return unavailable() || owner.getServer().overworld().getGameTime() - lastUsedAt >= lifetimeTicks;
-        }
-
-        /** 只有过期才释放并返回true，供removeIf移除。 */
-        boolean releaseIfExpired(long lifetimeTicks) {
-            if (!expired(lifetimeTicks)) return false;
+                    || owner.getServer().getLevel(sourceDimension) == null
+                    || owner.getServer().overworld().getGameTime() - lastUsedAt >= lifetimeTicks;
+            if (!expired) return false;
             release();
             return true;
         }
@@ -76,7 +68,6 @@ public final class RemoteCameraSession {
     // 因为玩家重生后唯一标识不变，但服务端玩家实例已替换。
     private final ServerPlayer owner;
     private final long sequence;
-    private final ResourceLocation filterId;
     private final ResourceKey<Level> sourceDimension;
     private final ServerLevel remoteLevel;
     private final double coordinateScale;
@@ -94,7 +85,6 @@ public final class RemoteCameraSession {
                                 Vec3 sourceOrigin, DimensionFilters.Route mapping) {
         owner = player;
         sequence = request.sequence();
-        filterId = request.filterId();
         sourceDimension = player.level().dimension();
         remoteLevel = target;
         this.coordinateScale = coordinateScale;
@@ -117,16 +107,16 @@ public final class RemoteCameraSession {
 
         RemoteCameraSession current = ACTIVE.get(player.getUUID());
         if (current != null && current.owner == player && current.sequence == request.sequence()
-                && current.filterId.equals(request.filterId())
                 && current.cameraStandId == request.cameraStandId()
                 && current.sourceDimension.equals(player.level().dimension())
-                && current.remoteLevel == target && current.matchesRoute(mapping) && current.isValid()) {
+                && current.remoteLevel == target && current.matchesRoute(mapping)
+                && player.getServer().getPlayerList().getPlayer(player.getUUID()) == player) {
             current.sendScene(serverMaxRenderDistance(player));
             return;
         }
 
         if (current != null) close(current.owner);
-        double scale = DimensionFilters.horizontalScale(mapping, player.serverLevel(), target);
+        double scale = DimensionFilters.horizontalScale(player.serverLevel(), target);
         Vec3 sourceOrigin = cameraAnchorPosition(player, request.cameraStandId());
         if (sourceOrigin == null) return;
         Vec3 converted = DimensionFilters.mapAbsolute(sourceOrigin, scale);
@@ -204,7 +194,7 @@ public final class RemoteCameraSession {
         if (filter.isEmpty() || !filterId.equals(BuiltInRegistries.ITEM.getKey(filter.getItem()))) {
             return null;
         }
-        DimensionFilters.Route route = DimensionFilters.resolve(player.serverLevel().registryAccess(), filter,
+        DimensionFilters.Route route = DimensionFilters.resolve(filter,
                 player.serverLevel().dimension().location());
         // 三种维度滤镜共用物品 ID，必须按目标组件解析出的路由区分。
         return route != null && targetDimension.equals(route.dimension()) ? route : null;
@@ -351,7 +341,7 @@ public final class RemoteCameraSession {
     private boolean isValid() {
         if (owner.getServer().getPlayerList().getPlayer(owner.getUUID()) != owner
                 || !owner.isAlive() || !owner.level().dimension().equals(sourceDimension)) return false;
-        DimensionFilters.Route current = mappingFor(owner, filterId, mapping.dimension(), cameraStandId);
+        DimensionFilters.Route current = mappingFor(owner, mapping.filter(), mapping.dimension(), cameraStandId);
         return matchesRoute(current)
                 && owner.getServer().getLevel(remoteLevel.dimension()) == remoteLevel;
     }

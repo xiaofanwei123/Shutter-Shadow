@@ -50,7 +50,6 @@ public class MyRenderHelper {
         Validate.notNull(shader);
 
         Matrix4f identityMatrix = new Matrix4f();
-        identityMatrix.identity();
         
         shader.MODEL_VIEW_MATRIX.set(identityMatrix);
         shader.PROJECTION_MATRIX.set(identityMatrix);

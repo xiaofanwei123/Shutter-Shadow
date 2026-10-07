@@ -1,6 +1,6 @@
 package com.xfw.shuttershadow.core.chunk_loading;
 
-
+import com.xfw.shuttershadow.Shuttershadow;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -16,8 +16,6 @@ import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import org.apache.commons.lang3.Validate;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import com.xfw.shuttershadow.util.CHelper;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.compat.SodiumInterface;
@@ -34,8 +32,6 @@ import java.util.function.Function;
 /** ClientLevel的多中心客户端区块缓存。 */
 @VanillaRuntimeHooks
 public class RemoteClientChunkMap extends ClientChunkCache {
-    private static final Logger LOGGER = LogManager.getLogger();
-    
     // 大多数区块访问发生在主线程，
     // 因此使用两份映射减少同步开销。
     // 主线程访问此映射，无需同步。
@@ -118,7 +114,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
         
         LevelChunk worldChunk = chunkMapForMainThread.get(chunkPosLong);
         if (worldChunk == null) {
-            LOGGER.error("Trying to replace biomes for missing chunk {} {}", x, z);
+            Shuttershadow.LOGGER.error("Trying to replace biomes for missing chunk {} {}", x, z);
         }
         else {
             worldChunk.replaceBiomes(friendlyByteBuf);
@@ -169,7 +165,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
             worldChunk.replaceWithPacketData(buf, nbt, consumer);
         }
         catch (Exception e) {
-            LOGGER.error(
+            Shuttershadow.LOGGER.error(
                 "Error deserializing chunk packet {} {}",
                 worldChunk.getLevel().dimension().location(),
                 worldChunk.getPos(),

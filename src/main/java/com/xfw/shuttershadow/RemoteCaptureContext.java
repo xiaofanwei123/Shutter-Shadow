@@ -91,7 +91,7 @@ public final class RemoteCaptureContext implements CameraHolder {
         if (filter.isEmpty()) return null;
         ServerLevel sourceLevel = (ServerLevel) cameraEntity.level();
         DimensionFilters.Route mapping = DimensionFilters.resolve(
-                sourceLevel.registryAccess(), filter, sourceLevel.dimension().location());
+                filter, sourceLevel.dimension().location());
         if (mapping == null) return null;
         if (session != null && !session.matchesRoute(mapping)) session = null;
         if (session != null) {
@@ -103,7 +103,7 @@ public final class RemoteCaptureContext implements CameraHolder {
         ResourceKey<Level> targetKey = ResourceKey.create(Registries.DIMENSION, mapping.dimension());
         ServerLevel remoteLevel = player.getServer().getLevel(targetKey);
         if (remoteLevel == null) return null;
-        double scale = DimensionFilters.horizontalScale(mapping, sourceLevel, remoteLevel);
+        double scale = DimensionFilters.horizontalScale(sourceLevel, remoteLevel);
         Vec3 sourceOrigin = stand.position();
         Vec3 targetOrigin = DimensionFilters.mapAbsolute(sourceOrigin, scale);
         return new RemoteCaptureContext(source, cameraEntity, remoteLevel, scale,

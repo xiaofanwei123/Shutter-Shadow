@@ -12,7 +12,6 @@
     "exposure.CameraStandRedstoneReleaseMixin",
     "exposure.ExposureRepositoryRemoteMixin",
     "minecraft.common.MixinLevel",
-    "minecraft.common.MixinLivingEntity",
     "minecraft.server.MixinMinecraftServer",
     "minecraft.server.MixinServerLevel",
     "minecraft.server.IEServerCommonPacketListenerImpl",

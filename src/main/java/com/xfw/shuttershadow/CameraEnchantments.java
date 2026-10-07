@@ -9,10 +9,11 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
 
-/** 定义曝光失效与自恋狂的附魔资源键。 */
+/** 定义相机附魔资源键，并读取相机上的附魔等级。 */
 public final class CameraEnchantments {
     public static final ResourceKey<Enchantment> EXPOSURE_FAILURE = key("exposure_failure");
     public static final ResourceKey<Enchantment> NARCISSISM = key("narcissism");
+    public static final ResourceKey<Enchantment> SAFE_DIMENSION_TELEPORT = key("safe_dimension_teleport");
 
     /** 禁止建立实例。 */
     private CameraEnchantments() {
@@ -24,12 +25,17 @@ public final class CameraEnchantments {
                 ResourceLocation.fromNamespaceAndPath(Shuttershadow.MODID, path));
     }
 
-    /** 先确认是CameraItem，再检查附魔组件中对应键的等级是否大于0。 */
+    /** 检查相机上是否具有指定附魔。 */
     public static boolean has(ItemStack camera, ResourceKey<Enchantment> enchantment) {
-        if (!(camera.getItem() instanceof CameraItem)) return false;
+        return level(camera, enchantment) > 0;
+    }
+
+    /** 读取指定附魔等级，非相机或未附魔时返回零。 */
+    public static int level(ItemStack camera, ResourceKey<Enchantment> enchantment) {
+        if (!(camera.getItem() instanceof CameraItem)) return 0;
         for (var entry : camera.getOrDefault(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY).entrySet()) {
-            if (entry.getIntValue() > 0 && entry.getKey().is(enchantment)) return true;
+            if (entry.getKey().is(enchantment)) return entry.getIntValue();
         }
-        return false;
+        return 0;
     }
 }
