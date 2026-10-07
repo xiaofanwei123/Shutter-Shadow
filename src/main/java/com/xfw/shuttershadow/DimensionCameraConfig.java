@@ -2,10 +2,10 @@ package com.xfw.shuttershadow;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.JsonOps;
-import com.xfw.shuttershadow.api.DimensionFilters;
 import com.xfw.shuttershadow.api.DimensionFilters.Route;
 import io.github.mortuusars.exposure.Exposure;
 import io.github.mortuusars.exposure.data.Filter;
@@ -38,12 +38,12 @@ public final class DimensionCameraConfig {
 
     /** 按物品、目标维度组件和来源维度索引路由，区分共享物品编号的滤镜变体。 */
     private final Map<ResourceLocation, Map<ResourceLocation,
-            Map<ResourceLocation, DimensionCameraPredicate.Route>>> filters;
+            Map<ResourceLocation, DimensionCameraPredicate.Source>>> filters;
 
-    /** 解析filters→物品ID→targets→目标维度→routes→来源维度，跳过非对象和非法ID，保存只读嵌套映射。 */
+    /** 按物品、目标维度和来源维度读取配置，坐标比例省略时为一。 */
     private DimensionCameraConfig(JsonObject root) {
         Map<ResourceLocation, Map<ResourceLocation,
-                Map<ResourceLocation, DimensionCameraPredicate.Route>>> parsed = new LinkedHashMap<>();
+                Map<ResourceLocation, DimensionCameraPredicate.Source>>> parsed = new LinkedHashMap<>();
         JsonObject filterValues = object(root, "filters");
         for (Map.Entry<String, JsonElement> filterEntry : filterValues.entrySet()) {
             if (!filterEntry.getValue().isJsonObject()) continue;
@@ -51,16 +51,16 @@ public final class DimensionCameraConfig {
             if (filterId == null) continue;
 
             JsonObject targets = object(filterEntry.getValue().getAsJsonObject(), "targets");
-            Map<ResourceLocation, Map<ResourceLocation, DimensionCameraPredicate.Route>> targetRoutes =
+            Map<ResourceLocation, Map<ResourceLocation, DimensionCameraPredicate.Source>> targetRoutes =
                     new LinkedHashMap<>();
             for (Map.Entry<String, JsonElement> targetEntry : targets.entrySet()) {
                 if (!targetEntry.getValue().isJsonObject()) continue;
                 ResourceLocation targetDimension = ResourceLocation.tryParse(targetEntry.getKey());
                 if (targetDimension == null) continue;
-                Map<ResourceLocation, DimensionCameraPredicate.Route> routes = parseRoutes(
-                        object(targetEntry.getValue().getAsJsonObject(), "routes"));
-                if (!routes.isEmpty()) {
-                    targetRoutes.put(targetDimension, routes);
+                Map<ResourceLocation, DimensionCameraPredicate.Source> sources = parseSources(
+                        targetEntry.getValue().getAsJsonObject());
+                if (!sources.isEmpty()) {
+                    targetRoutes.put(targetDimension, sources);
                 }
             }
             if (!targetRoutes.isEmpty()) {
@@ -103,34 +103,30 @@ public final class DimensionCameraConfig {
     /** 按滤镜物品、组件目标、当前来源维度取JSON路由，缺失任意一层返回null。 */
     private Route forFilter(ResourceLocation filter, ResourceLocation target, ResourceLocation source) {
         if (filter == null || target == null || source == null) return null;
-        Map<ResourceLocation, Map<ResourceLocation, DimensionCameraPredicate.Route>> targetRoutes =
+        Map<ResourceLocation, Map<ResourceLocation, DimensionCameraPredicate.Source>> targetRoutes =
                 filters.get(filter);
         if (targetRoutes == null) return null;
-        Map<ResourceLocation, DimensionCameraPredicate.Route> routes = targetRoutes.get(target);
-        if (routes == null) return null;
-        DimensionCameraPredicate.Route route = routes.get(source);
-        return route == null ? null : new Route(filter, route.targetDimension(), route.coordinateScale());
+        Map<ResourceLocation, DimensionCameraPredicate.Source> sources = targetRoutes.get(target);
+        if (sources == null) return null;
+        DimensionCameraPredicate.Source route = sources.get(source);
+        return route == null ? null : new Route(filter, target, route.coordinateScale());
     }
 
-    /** 用ROUTE_CODEC解码每条来源路由，只收集成功解码的项，返回只读映射。 */
-    private static Map<ResourceLocation, DimensionCameraPredicate.Route> parseRoutes(JsonObject routeValues) {
-        Map<ResourceLocation, DimensionCameraPredicate.Route> routes = new LinkedHashMap<>();
-        for (Map.Entry<String, JsonElement> routeEntry : routeValues.entrySet()) {
-            if (!routeEntry.getValue().isJsonObject()) continue;
-            ResourceLocation source = ResourceLocation.tryParse(routeEntry.getKey());
-            if (source == null) continue;
-            DimensionCameraPredicate.ROUTE_CODEC.parse(JsonOps.INSTANCE, routeEntry.getValue())
-                    .result().ifPresent(route -> routes.put(source, route));
-        }
-        return Collections.unmodifiableMap(routes);
+    /** 用同一编解码器读取来源数组，与数据包保持一致。 */
+    private static Map<ResourceLocation, DimensionCameraPredicate.Source> parseSources(JsonObject target) {
+        Map<ResourceLocation, DimensionCameraPredicate.Source> sources = new LinkedHashMap<>();
+        DimensionCameraPredicate.CODEC.parse(JsonOps.INSTANCE, target).result().ifPresent(predicate ->
+                predicate.routes().forEach(route -> sources.put(route.sourceDimension(), route)));
+        return Collections.unmodifiableMap(sources);
     }
 
-    /** 查找第一个物品谓词命中的Exposure滤镜，从其维度谓词取来源路由。 */
+    /** 首个匹配滤镜省略来源配置时采用一，否则按显式来源限制解析。 */
     public static Route resolve(RegistryAccess registryAccess, ItemStack filterStack,
                                 ResourceLocation sourceDimension) {
         if (filterStack == null || filterStack.isEmpty() || sourceDimension == null) return null;
         ResourceLocation filterId = BuiltInRegistries.ITEM.getKey(filterStack.getItem());
-        ResourceLocation targetDimension = DimensionFilters.target(filterStack);
+        ResourceLocation targetDimension = filterStack.get(Shuttershadow.DIMENSION_FILTER_TARGET.get());
+        if (targetDimension == null || targetDimension.equals(sourceDimension)) return null;
         try {
             if (registryAccess != null) {
                 List<Filter> candidates;
@@ -141,14 +137,11 @@ public final class DimensionCameraConfig {
                 for (Filter filter : candidates) {
                     if (filter.predicate().test(filterStack)) {
                         DimensionCameraPredicate predicate = DimensionCameraPredicate.from(filter);
-                        if (predicate != null) {
-                            DimensionCameraPredicate.Route route = predicate.routeFor(sourceDimension);
-                            if (route != null) {
-                                return new Route(filterId, route.targetDimension(), route.coordinateScale());
-                            }
-                        }
-                        // 与 Exposure 的 findFirst 一致：不越过先匹配到的普通滤镜。
-                        break;
+                        if (predicate == null) return new Route(filterId, targetDimension, 1.0D);
+                        DimensionCameraPredicate.Source route = predicate.routeFor(sourceDimension);
+                        // 匹配结果是权威配置，不能用本地兜底重新启用未列出的来源。
+                        return route == null ? null
+                                : new Route(filterId, targetDimension, route.coordinateScale());
                     }
                 }
             }
@@ -158,45 +151,37 @@ public final class DimensionCameraConfig {
         return load().forFilter(filterId, targetDimension, sourceDimension);
     }
 
-    /** 构造三种原版目标维度的默认来源路由及coordinate_scale。 */
+    /** 创建原版维度的默认配置，下界目标比例为八，其余省略采用一。 */
     private static JsonObject defaults() {
         JsonObject root = new JsonObject();
         JsonObject filters = new JsonObject();
         JsonObject dimensionFilter = new JsonObject();
         JsonObject targets = new JsonObject();
-        addTargetRoutes(targets, "minecraft:the_nether",
-                route(Level.OVERWORLD.location().toString(), "minecraft:the_nether", 8.0D),
-                route("minecraft:the_end", "minecraft:the_nether", 8.0D));
-        addTargetRoutes(targets, "minecraft:the_end",
-                route(Level.OVERWORLD.location().toString(), "minecraft:the_end", 1.0D),
-                route("minecraft:the_nether", "minecraft:the_end", 1.0D));
-        addTargetRoutes(targets, Level.OVERWORLD.location().toString(),
-                route("minecraft:the_nether", Level.OVERWORLD.location().toString(), 1.0D),
-                route("minecraft:the_end", Level.OVERWORLD.location().toString(), 1.0D));
+        addTargetSources(targets, "minecraft:the_nether", 8.0D,
+                Level.OVERWORLD.location().toString(), "minecraft:the_end");
+        addTargetSources(targets, "minecraft:the_end", 1.0D,
+                Level.OVERWORLD.location().toString(), "minecraft:the_nether");
+        addTargetSources(targets, Level.OVERWORLD.location().toString(), 1.0D,
+                "minecraft:the_nether", "minecraft:the_end");
         dimensionFilter.add("targets", targets);
         filters.add(Shuttershadow.DIMENSION_FILTER.getId().toString(), dimensionFilter);
         root.add("filters", filters);
         return root;
     }
 
-    /** 把给定目标的来源路由打包进targets对象。 */
-    private static void addTargetRoutes(JsonObject targets, String target, JsonObject... routes) {
+    /** 将目标与允许使用滤镜的来源维度分开记录，不重复声明目标。 */
+    private static void addTargetSources(JsonObject targets, String target, double coordinateScale,
+                                         String... sourceDimensions) {
         JsonObject value = new JsonObject();
-        JsonObject routeMap = new JsonObject();
-        for (JsonObject route : routes) {
-            routeMap.add(route.get("source_dimension").getAsString(), route);
+        JsonArray routes = new JsonArray();
+        for (String sourceDimension : sourceDimensions) {
+            JsonObject source = new JsonObject();
+            source.addProperty("source_dimension", sourceDimension);
+            if (coordinateScale != 1.0D) source.addProperty("coordinate_scale", coordinateScale);
+            routes.add(source);
         }
-        value.add("routes", routeMap);
+        value.add("routes", routes);
         targets.add(target, value);
-    }
-
-    /** 创建含source_dimension、target_dimension、coordinate_scale的JSON对象。 */
-    private static JsonObject route(String source, String target, double coordinateScale) {
-        JsonObject value = new JsonObject();
-        value.addProperty("source_dimension", source);
-        value.addProperty("target_dimension", target);
-        value.addProperty("coordinate_scale", coordinateScale);
-        return value;
     }
 
     /** 安全取得JSON子对象，缺失或类型错误返回空对象。 */

@@ -9,7 +9,6 @@ import org.slf4j.Logger;
 import java.util.function.BooleanSupplier;
 
 // 任务返回真时，从队列中移除。
-// 任务返回假时，留待下一轮继续执行。
 /** 同步保护的可重试任务列表。 */
 public class MyTaskList {
     private static final Logger LOGGER = LogUtils.getLogger();

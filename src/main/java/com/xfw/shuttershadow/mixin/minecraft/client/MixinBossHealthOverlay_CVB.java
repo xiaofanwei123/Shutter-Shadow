@@ -9,7 +9,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /** 全局禁用首领雾效，避免多世界画面和无缝换维时突变。 */
 @Mixin(BossHealthOverlay.class)
-// Shuttershadow 第三轮整理：从外围模块迁入渲染内核，保持相机远景的 Boss 雾行为不变。
 public class MixinBossHealthOverlay_CVB {
     // 远景世界没有同步完整的首领状态。
     // 换维时原版首领雾可能突然变浓。

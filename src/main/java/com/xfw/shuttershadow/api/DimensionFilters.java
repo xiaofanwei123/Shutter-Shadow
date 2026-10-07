@@ -36,7 +36,7 @@ public final class DimensionFilters {
         return DimensionCameraConfig.resolve(registries, filter, sourceDimension);
     }
 
-    /** 路由有有限比例时以来源维度类型比例除该值，否则用原版两世界传送比例。 */
+    /** 来源比例除以目标配置比例；数据包缺省为一，接口显式自动标记则使用维度类型换算。 */
     public static double horizontalScale(@Nullable Route route, Level source, Level target) {
         return route != null && Double.isFinite(route.coordinateScale())
                 ? source.dimensionType().coordinateScale() / route.coordinateScale()

@@ -1,5 +1,7 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
 
+import com.xfw.shuttershadow.Shuttershadow;
+
 
 import net.minecraft.client.renderer.culling.Frustum;
 import org.joml.FrustumIntersection;
@@ -9,7 +11,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
-import com.xfw.shuttershadow.util.Helper;
 import com.xfw.shuttershadow.util.CountDownInt;
 
 /** 为原版视锥偏移循环增加上限，防止异常投影导致卡死。 */
@@ -55,10 +56,9 @@ public abstract class MixinFrustum_FixDeadLoop {
             countLimit--;
             if (countLimit <= 0) {
                 if (shuttershadow$logLimit.tryDecrement()) {
-                    Helper.err("the projection matrix and the frustum are abnormal");
-                    new Throwable().printStackTrace();
+                    Shuttershadow.LOGGER.error("the projection matrix and the frustum are abnormal", new Throwable());
                     if (shuttershadow$logLimit.isZero()) {
-                        Helper.log("The logging reached its limit. Similar log won't be displayed.");
+                        Shuttershadow.LOGGER.info("The logging reached its limit. Similar log won't be displayed.");
                     }
                 }
                 break;

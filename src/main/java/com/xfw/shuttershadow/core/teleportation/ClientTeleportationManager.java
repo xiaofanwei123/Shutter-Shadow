@@ -1,7 +1,6 @@
 package com.xfw.shuttershadow.core.teleportation;
 
 
-import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -10,7 +9,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.apache.commons.lang3.Validate;
-import org.slf4j.Logger;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.access.IEAbstractClientPlayer;
@@ -24,16 +22,13 @@ import com.xfw.shuttershadow.core.render.MyGameRenderer;
 import com.xfw.shuttershadow.core.render.FogRendererContext;
 import com.xfw.shuttershadow.core.render.RenderStates;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
-import com.xfw.shuttershadow.util.Helper;
 
 /** 客户端真实无缝换维度，复用已观察的ClientLevel/renderer与原LocalPlayer，避免传统respawn加载屏。 */
 public class ClientTeleportationManager {
-    private static final Logger LOGGER = LogUtils.getLogger();
     public static final Minecraft client = Minecraft.getInstance();
 
     /** 目标不同先changePlayerDimension，随后设脚底位置、调整载具、更新本帧状态并要求一次原版地形setup。 */
     public static void forceTeleportPlayer(ResourceKey<Level> toDimension, Vec3 destination) {
-        LOGGER.info("client player force teleported {} {}", toDimension.location(), destination);
         
         ClientLevel fromWorld = client.level;
         assert fromWorld != null;
@@ -98,7 +93,7 @@ public class ClientTeleportationManager {
         client.getBlockEntityRenderDispatcher().setLevel(toWorld);
         
         if (vehicle != null) {
-            Vec3 offset = McHelper.getVehicleOffsetFromPassenger(vehicle, player);
+            Vec3 offset = player.getVehicleAttachmentPoint(vehicle);
             Vec3 vehiclePos = player.position().add(offset);
             moveClientEntityAcrossDimension(
                 vehicle, toWorld,
@@ -112,13 +107,6 @@ public class ClientTeleportationManager {
             player.startRiding(vehicle, true);
         }
         
-        Helper.log(String.format(
-            "Client Changed Dimension from %s to %s time: %s age: %s",
-            fromDimension.location(),
-            toDimension.location(),
-            toWorld.getGameTime(),
-            player.tickCount
-        ));
         
         FogRendererContext.onPlayerTeleport(fromDimension, toDimension);
         

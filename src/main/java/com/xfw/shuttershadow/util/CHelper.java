@@ -1,23 +1,23 @@
 package com.xfw.shuttershadow.util;
 
+import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.core.CoreSettings;
-
-
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import org.lwjgl.opengl.GL11;
 
 
 import static org.lwjgl.opengl.GL11.GL_NO_ERROR;
 
 // 仅供客户端使用。
-// Shuttershadow 第二轮裁剪：移除仅供维度堆叠选择界面使用的图标查询。
-/** 提供客户端图形错误检查和聊天消息输出。 */
+/** 提供客户端图形检查和聊天提示。 */
 public class CHelper {
     
     private static int reportedErrorNum = 0;
     
-    /** 只在配置启用且累计错误未超100时调用真实检查。 */
+    /** 配置启用且累计错误未超100时检查OpenGL，并记录异常。 */
     public static void checkGlError() {
         if (!CoreSettings.doCheckGlError) {
             return;
@@ -25,15 +25,9 @@ public class CHelper {
         if (reportedErrorNum > 100) {
             return;
         }
-        doCheckGlError();
-    }
-    
-    /** 调用glGetError，非零时记录代码与调用栈并增加累计错误数。 */
-    public static void doCheckGlError() {
         int errorCode = GL11.glGetError();
         if (errorCode != GL_NO_ERROR) {
-            Helper.err("OpenGL Error" + errorCode);
-            new Throwable().printStackTrace();
+            Shuttershadow.LOGGER.error("OpenGL Error {}", errorCode, new Throwable());
             reportedErrorNum++;
         }
     }
@@ -41,6 +35,22 @@ public class CHelper {
     /** 向客户端聊天栏添加消息。 */
     public static void printChat(Component text) {
         Minecraft.getInstance().gui.getChat().addMessage(text);
+    }
+
+    /** 创建关闭所有内核警告的配置提示文本。 */
+    public static Component getDisableWarningText() {
+        return Component.literal(" ").append(
+            Component.translatable("shuttershadow.core.warning_config_hint")
+        ).append(" ");
+    }
+
+    /** 创建带下划线的可点击链接文本。 */
+    public static MutableComponent getLinkText(String link) {
+        return Component.literal(link).withStyle(
+            style -> style.withClickEvent(new ClickEvent(
+                ClickEvent.Action.OPEN_URL, link
+            )).withUnderlined(true)
+        );
     }
     
 }

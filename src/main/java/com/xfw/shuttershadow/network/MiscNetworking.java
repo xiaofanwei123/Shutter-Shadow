@@ -20,7 +20,6 @@ import net.minecraft.world.level.dimension.DimensionType;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
-import com.xfw.shuttershadow.util.McHelper;
 
 /** 维度类型映射payload容器。 */
 public class MiscNetworking {
@@ -99,22 +98,17 @@ public class MiscNetworking {
             for (String key : dimTypeTag.getAllKeys()) {
                 ResourceKey<Level> dimId = ResourceKey.create(
                     Registries.DIMENSION,
-                    McHelper.newResourceLocation(key)
+                    ResourceLocation.parse(key)
                 );
                 String dimTypeId = dimTypeTag.getString(key);
                 ResourceKey<DimensionType> dimType = ResourceKey.create(
                     Registries.DIMENSION_TYPE,
-                    McHelper.newResourceLocation(dimTypeId)
+                    ResourceLocation.parse(dimTypeId)
                 );
                 builder.put(dimId, dimType);
             }
             
-            var dimTypeMap = builder.build();
-            ClientWorldLoader.dimIdToDimTypeId = dimTypeMap;
-            LOGGER.info(
-                "Client accepted dimension type mapping {}",
-                dimTypeMap
-            );
+            ClientWorldLoader.dimIdToDimTypeId = builder.build();
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.xfw.shuttershadow.mixin.minecraft.server;
 
 
+import com.xfw.shuttershadow.Shuttershadow;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket;
@@ -16,8 +17,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
-import org.slf4j.Logger;
-import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
@@ -29,9 +28,7 @@ import com.xfw.shuttershadow.access.IEPlayerMoveC2SPacket;
 import com.xfw.shuttershadow.access.IEPlayerPositionLookS2CPacket;
 import com.xfw.shuttershadow.util.ServerTaskList;
 import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
-import com.xfw.shuttershadow.core.CoreConfig;
 import com.xfw.shuttershadow.core.teleportation.ServerTeleportationManager;
-import com.xfw.shuttershadow.util.CountDownInt;
 
 import java.util.Set;
 
@@ -49,17 +46,10 @@ public abstract class MixinServerGamePacketListenerImpl {
     @Shadow
     private int tickCount;
 
-    @Shadow
-    @Final
-    static Logger LOGGER;
-    
     /** Shadow 引用原 getPlayer，保留原连接玩家查询声明。 */
     @Shadow
     public abstract ServerPlayer getPlayer();
     
-    
-    @Unique
-    private static final CountDownInt LOG_LIMIT = new CountDownInt(20);
     
     @Unique
     private int ip_wrongMovePacketCount = 0;
@@ -86,7 +76,7 @@ public abstract class MixinServerGamePacketListenerImpl {
         if (packetDimension == null) {
             // 原版客户端收到扩展位置包时通常已断开连接。
             // 因此正常情况下不会收到缺少维度字段的移动包。
-            LOGGER.error("Player move packet is missing dimension info. Maybe the player client does not have Shuttershadow");
+            Shuttershadow.LOGGER.error("Player move packet is missing dimension info. Maybe the player client does not have Shuttershadow");
             ServerTaskList.of(player.server).addTask(() -> {
                 player.connection.disconnect(Component.literal(
                     "The client does not have Shuttershadow"
@@ -97,23 +87,9 @@ public abstract class MixinServerGamePacketListenerImpl {
         }
         
         if (player.level().dimension() != packetDimension) {
-            if (LOG_LIMIT.tryDecrement()) {
-                LOGGER.info(
-                    "[shuttershadow] Ignoring player move packet. Player: {} Packet: {} {} {} {}",
-                    player, packetDimension.location(),
-                    packet.getX(player.getX()),
-                    packet.getY(player.getY()),
-                    packet.getZ(player.getZ())
-                );
-            }
-            
             ip_wrongMovePacketCount += 1;
             
             if (ip_wrongMovePacketCount > 10) {
-                LOGGER.info(
-                    "[shuttershadow] Force move player {} {} {}",
-                    player, player.level().dimension().location(), player.position()
-                );
                 ServerTeleportationManager.of(player.server).forceTeleportPlayer(
                     player, player.level().dimension(), player.position()
                 );
@@ -141,19 +117,13 @@ public abstract class MixinServerGamePacketListenerImpl {
         // 重生期间玩家可能已标记移除，仍有传送请求到达。
         
         if (player.getRemovalReason() != null) {
-            LOGGER.error(
+            Shuttershadow.LOGGER.error(
                 "[shuttershadow] Tries to send player pos packet to a removed player {}",
                 player, new Throwable()
             );
             return;
         }
         
-        if (CoreConfig.SERVER_TELEPORT_LOGGING.get()) {
-            LOGGER.info(
-                "Teleporting player {} to {} {} {} {}",
-                player, player.level().dimension().location(), x, y, z
-            );
-        }
         
         double xBase = relativeAttrs.contains(RelativeMovement.X) ? this.player.getX() : 0.0;
         double yBase = relativeAttrs.contains(RelativeMovement.Y) ? this.player.getY() : 0.0;
@@ -194,20 +164,16 @@ public abstract class MixinServerGamePacketListenerImpl {
         ServerboundAcceptTeleportationPacket packet, CallbackInfo ci
     ) {
         if (ip_dimOfAwaitingPosition == null) {
-            LOGGER.error("[shuttershadow] ip_dimOfAwaitingPosition is null {}", player);
+            Shuttershadow.LOGGER.error("[shuttershadow] ip_dimOfAwaitingPosition is null {}", player);
             return;
         }
         
         if (ip_dimOfAwaitingPosition != player.level().dimension()) {
-            LOGGER.info(
-                "Accepted teleport to another dimension {} {}",
-                ip_dimOfAwaitingPosition, awaitingPositionFromClient
-            );
             
             ServerLevel destWorld = player.server.getLevel(ip_dimOfAwaitingPosition);
             
             if (destWorld == null) {
-                LOGGER.error(
+                Shuttershadow.LOGGER.error(
                     "[shuttershadow] Cannot find destination world {}",
                     ip_dimOfAwaitingPosition.location()
                 );

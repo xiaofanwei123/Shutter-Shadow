@@ -4,7 +4,6 @@ package com.xfw.shuttershadow.core.render;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.world.level.Level;
-import com.xfw.shuttershadow.util.Helper;
 
 /** 每维度光照纹理。 */
 public class DimensionRenderHelper {
@@ -20,7 +19,6 @@ public class DimensionRenderHelper {
         }
         else {
             lightmapTexture = new LightTexture(client.gameRenderer, client);
-            Helper.log("Created lightmap texture for " + world.dimension().location());
         }
     }
     

@@ -26,7 +26,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.access.IEWorld;
 import com.xfw.shuttershadow.mixin.minecraft.server.MixinServerGamePacketListenerImpl_Redirect;
 
@@ -40,7 +39,7 @@ public class PacketRedirection {
     
     // 次级维度的数据包使用本模组的重定向通道。
     public static final ResourceLocation payloadId =
-        McHelper.newResourceLocation("shuttershadow:redirect");
+        ResourceLocation.parse("shuttershadow:redirect");
     
     private static final ThreadLocal<ResourceKey<Level>> serverPacketRedirection =
         ThreadLocal.withInitial(() -> null);

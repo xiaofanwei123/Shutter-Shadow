@@ -5,6 +5,7 @@ import com.xfw.shuttershadow.api.DimensionFilters;
 import com.xfw.shuttershadow.core.DimensionRuntime;
 import com.xfw.shuttershadow.core.DimensionRuntimeClient;
 import com.xfw.shuttershadow.core.CoreConfig;
+import io.github.mortuusars.exposure.Exposure;
 import net.minecraft.advancements.critereon.ItemSubPredicate;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.resources.ResourceLocation;
@@ -25,6 +26,9 @@ import net.minecraft.world.item.enchantment.EnchantmentInstance;
 import net.minecraft.world.level.Level;
 import net.minecraft.core.registries.Registries;
 import org.slf4j.Logger;
+
+import java.util.LinkedHashSet;
+import java.util.List;
 
 /** NeoForge模组入口。 */
 @Mod(Shuttershadow.MODID)
@@ -56,41 +60,45 @@ public class Shuttershadow {
     public static final DeferredItem<MobDimensionFilmRollItem> MOB_DIMENSION_FILM = ITEMS.register(
             "mob_dimension_film", () -> new MobDimensionFilmRollItem(new Item.Properties().stacksTo(16)));
 
-    /** 携带来源维度到目标维度路由的物品谓词类型。 */
+    /** 可选的来源维度与坐标比例配置。 */
     public static final java.util.function.Supplier<ItemSubPredicate.Type<DimensionCameraPredicate>>
             DIMENSION_CAMERA_PREDICATE = ITEM_SUB_PREDICATES.register(
                     "camera_dimension", () -> new ItemSubPredicate.Type<>(DimensionCameraPredicate.CODEC));
 
+    /** 注册维度滤镜、胶卷与相机附魔书的创造物品栏。 */
     public static final DeferredHolder<CreativeModeTab, CreativeModeTab> CREATIVE_TAB =
             CREATIVE_MODE_TABS.register("camera_filters",
             () -> CreativeModeTab.builder()
                     .title(Component.translatable("itemGroup.shuttershadow"))
                     .withTabsBefore(CreativeModeTabs.FUNCTIONAL_BLOCKS)
                     .icon(() -> DimensionFilters.create(Level.OVERWORLD.location()))
-                    .displayItems((parameters, output) -> {
-                        parameters.holders().lookup(io.github.mortuusars.exposure.Exposure.Registries.FILTER)
-                                .ifPresent(filters -> filters.listElements()
-                                        .filter(holder -> holder.value().predicate().items()
-                                                .map(items -> items.contains(DIMENSION_FILTER.get().builtInRegistryHolder()))
-                                                .orElse(false))
-                                        .map(holder -> DimensionCameraPredicate.from(holder.value()))
-                                        .filter(java.util.Objects::nonNull)
-                                        .flatMap(predicate -> predicate.routes().values().stream())
-                                        .map(DimensionCameraPredicate.Route::targetDimension)
-                                        .distinct()
-                                        .forEach(target -> output.accept(DimensionFilters.create(target))));
-                        output.accept(PLAYER_DIMENSION_FILM.get());
-                        output.accept(MOB_DIMENSION_FILM.get());
-                        parameters.holders().lookup(Registries.ENCHANTMENT).ifPresent(enchantments -> {
-                            enchantments.get(CameraEnchantments.EXPOSURE_FAILURE).ifPresent(holder ->
-                                    output.accept(EnchantedBookItem.createForEnchantment(new EnchantmentInstance(holder, 1))));
-                            enchantments.get(CameraEnchantments.NARCISSISM).ifPresent(holder ->
-                                    output.accept(EnchantedBookItem.createForEnchantment(new EnchantmentInstance(holder, 1))));
-                        });
-                    })
+                    .displayItems(Shuttershadow::displayCreativeItems)
                     .build());
 
-    /** 注册COMMON内核、SERVER玩法、CLIENT个人偏好配置及物品等DeferredRegister，再启动通用内核与客户端内核。 */
+    /** 从当前数据包生成去重滤镜变体，并添加胶卷和两本相机附魔书。 */
+    private static void displayCreativeItems(CreativeModeTab.ItemDisplayParameters parameters,
+                                            CreativeModeTab.Output output) {
+        parameters.holders().lookup(Exposure.Registries.FILTER).ifPresent(filters -> {
+            var targets = new LinkedHashSet<ResourceLocation>();
+            filters.listElements().forEach(holder -> {
+                var predicate = holder.value().predicate();
+                if (predicate.items().filter(items -> items.contains(DIMENSION_FILTER)).isEmpty()) return;
+                var target = predicate.components().asPatch().get(DIMENSION_FILTER_TARGET.get());
+                if (target != null) target.ifPresent(targets::add);
+            });
+            targets.forEach(target -> output.accept(DimensionFilters.create(target)));
+        });
+        output.accept(PLAYER_DIMENSION_FILM);
+        output.accept(MOB_DIMENSION_FILM);
+        parameters.holders().lookup(Registries.ENCHANTMENT).ifPresent(enchantments -> {
+            for (var key : List.of(CameraEnchantments.EXPOSURE_FAILURE, CameraEnchantments.NARCISSISM)) {
+                enchantments.get(key).ifPresent(holder -> output.accept(
+                        EnchantedBookItem.createForEnchantment(new EnchantmentInstance(holder, 1))));
+            }
+        });
+    }
+
+    /** 注册COMMON日志、SERVER玩法和加载、CLIENT渲染和个人偏好配置，再启动通用内核与客户端内核。 */
     public Shuttershadow(IEventBus modEventBus, ModContainer modContainer) {
         CoreConfig.register(modContainer, modEventBus);
         modContainer.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER,

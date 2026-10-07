@@ -1,92 +1,68 @@
 package com.xfw.shuttershadow.core;
 
-import com.xfw.shuttershadow.util.Helper;
+import com.xfw.shuttershadow.ShuttershadowConfig;
+import com.xfw.shuttershadow.util.ModLogging;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
-import java.util.List;
-
-/** 定义并应用 NeoForge 原生的通用内核配置。 */
+/** 定义日志通用配置，并按所属类型应用内核配置。 */
 public final class CoreConfig {
     public static final String FILE_NAME = "shuttershadow-core.toml";
     public static final ModConfigSpec SPEC;
-    public static final ModConfigSpec.BooleanValue ENABLE_CLIENT_PERFORMANCE_ADJUSTMENT;
-    public static final ModConfigSpec.BooleanValue CLIENT_TOLERANT_VERSION_MISMATCH_WITH_SERVER;
-    public static final ModConfigSpec.BooleanValue DO_CHECK_GL_ERROR;
-    public static final ModConfigSpec.BooleanValue SAVE_MEMORY_IN_BUFFER_PACK;
-    public static final ModConfigSpec.BooleanValue ENABLE_WARNING;
-    public static final ModConfigSpec.BooleanValue SERVER_SIDE_NORMAL_CHUNK_LOADING;
-    public static final ModConfigSpec.BooleanValue CHUNK_PACKET_DEBUG;
-    public static final ModConfigSpec.BooleanValue ENABLE_REMOTE_CHUNK_LOADING;
-    public static final ModConfigSpec.BooleanValue SERVER_TOLERANT_VERSION_MISMATCH_WITH_CLIENT;
-    public static final ModConfigSpec.BooleanValue SERVER_REJECT_CLIENT_WITHOUT_SHUTTERSHADOW;
-    public static final ModConfigSpec.BooleanValue SERVER_TELEPORT_LOGGING;
-    public static final ModConfigSpec.ConfigValue<List<? extends String>> DISABLED_WARNINGS;
+    public static final ModConfigSpec.BooleanValue ENABLE_LOGGING;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
-        ENABLE_CLIENT_PERFORMANCE_ADJUSTMENT = define(builder, "enableClientPerformanceAdjustment", true,
-                "Reduce live dimension view distance when the client is lagging.");
-        CLIENT_TOLERANT_VERSION_MISMATCH_WITH_SERVER = define(builder, "clientTolerantVersionMismatchWithServer", false,
-                "Allow connecting to a server with a different dimension protocol version.");
-        DO_CHECK_GL_ERROR = define(builder, "doCheckGlError", false,
-                "Check OpenGL errors for rendering diagnostics.");
-        SAVE_MEMORY_IN_BUFFER_PACK = define(builder, "saveMemoryInBufferPack", false,
-                "Use smaller initial chunk mesh buffers to reduce memory use.");
-        ENABLE_WARNING = define(builder, "enableWarning", true,
-                "Show dimension runtime warnings.");
-        SERVER_SIDE_NORMAL_CHUNK_LOADING = define(builder, "serverSideNormalChunkLoading", true,
-                "Keep remote camera chunk tickets active while their subscriptions are in use.");
-        CHUNK_PACKET_DEBUG = define(builder, "chunkPacketDebug", false,
-                "Log remote chunk packets for diagnostics.");
-        ENABLE_REMOTE_CHUNK_LOADING = define(builder, "enableRemoteChunkLoading", true,
-                "Enable additional chunk loading for dimension cameras.");
-        SERVER_TOLERANT_VERSION_MISMATCH_WITH_CLIENT = define(builder, "serverTolerantVersionMismatchWithClient", false,
-                "Allow clients with a different dimension protocol version.");
-        SERVER_REJECT_CLIENT_WITHOUT_SHUTTERSHADOW = define(builder, "serverRejectClientWithoutShuttershadow", true,
-                "Require clients to support Shuttershadow dimension networking.");
-        SERVER_TELEPORT_LOGGING = define(builder, "serverTeleportLogging", false,
-                "Log seamless dimension teleports for diagnostics.");
-        DISABLED_WARNINGS = builder.comment("Warning IDs to hide, for example low_max_memory.")
-                .translation("shuttershadow.configuration.core.disabledWarnings")
-                .defineListAllowEmpty("disabledWarnings", List.of(), () -> "", value -> value instanceof String);
+        ENABLE_LOGGING = builder
+                .comment("统一开启或关闭本模组日志，默认关闭，开启时遵守日志级别，不影响游戏内警告。")
+                .translation("shuttershadow.configuration.core.enableLogging")
+                .define("enableLogging", false);
         SPEC = builder.build();
     }
 
     /** 工具类私有构造器。 */
     private CoreConfig() {}
 
-    /** 注册带说明和翻译键的布尔配置项。 */
-    private static ModConfigSpec.BooleanValue define(ModConfigSpec.Builder builder, String key,
-                                                     boolean defaultValue, String comment) {
-        return builder.comment(comment).translation("shuttershadow.configuration.core." + key)
-                .define(key, defaultValue);
-    }
-
-    /** 注册通用配置文件，并监听加载和重载。 */
+    /** 注册日志通用配置，并监听各类内核配置的加载、重载与卸载。 */
     public static void register(ModContainer container, IEventBus eventBus) {
+        ModLogging.setEnabled(false);
         container.registerConfig(ModConfig.Type.COMMON, SPEC, FILE_NAME);
         eventBus.addListener(ModConfigEvent.Loading.class, CoreConfig::apply);
         eventBus.addListener(ModConfigEvent.Reloading.class, CoreConfig::apply);
+        eventBus.addListener(ModConfigEvent.Unloading.class, CoreConfig::apply);
     }
 
-    /** 仅处理本模组配置，将已加载的选项应用到内核。 */
+    /** 只读取当前事件所属配置，加载时应用设置，卸载时恢复默认。 */
     static void apply(ModConfigEvent event) {
-        if (event.getConfig().getSpec() != SPEC) return;
-        CoreSettings.doCheckGlError = DO_CHECK_GL_ERROR.get();
-        CoreSettings.activeLoading = SERVER_SIDE_NORMAL_CHUNK_LOADING.get();
-        CoreSettings.enableClientPerformanceAdjustment = ENABLE_CLIENT_PERFORMANCE_ADJUSTMENT.get();
-        CoreSettings.chunkPacketDebug = CHUNK_PACKET_DEBUG.get();
-        CoreSettings.saveMemoryInBufferPack = SAVE_MEMORY_IN_BUFFER_PACK.get();
-        Helper.LOGGER.info("Shuttershadow dimension runtime config applied");
+        var spec = event.getConfig().getSpec();
+        if (spec == SPEC) {
+            ModLogging.setEnabled(SPEC.isLoaded() && ENABLE_LOGGING.get());
+        } else if (spec == ShuttershadowConfig.CLIENT_SPEC) {
+            CoreSettings.doCheckGlError = configuredOrDefault(ShuttershadowConfig.CLIENT_SPEC,
+                    ShuttershadowConfig.DO_CHECK_GL_ERROR);
+            CoreSettings.enableClientPerformanceAdjustment = configuredOrDefault(ShuttershadowConfig.CLIENT_SPEC,
+                    ShuttershadowConfig.ENABLE_CLIENT_PERFORMANCE_ADJUSTMENT);
+            CoreSettings.saveMemoryInBufferPack = configuredOrDefault(ShuttershadowConfig.CLIENT_SPEC,
+                    ShuttershadowConfig.SAVE_MEMORY_IN_BUFFER_PACK);
+        } else if (spec == ShuttershadowConfig.SERVER_SPEC) {
+            CoreSettings.activeLoading = configuredOrDefault(ShuttershadowConfig.SERVER_SPEC,
+                    ShuttershadowConfig.SERVER_SIDE_NORMAL_CHUNK_LOADING);
+        } else {
+            return;
+        }
     }
 
-    /** 根据全局开关和禁用列表判断是否显示警告。 */
-    public static boolean shouldDisplayWarning(String warningKey) {
-        return ENABLE_WARNING.get() && !DISABLED_WARNINGS.get().contains(warningKey);
+    /** 读取已加载的布尔配置，尚未加载或卸载后使用默认值。 */
+    private static boolean configuredOrDefault(ModConfigSpec spec, ModConfigSpec.BooleanValue value) {
+        return spec.isLoaded() ? value.get() : value.getDefault();
+    }
+
+    /** 读取所有内核游戏内警告的统一开关。 */
+    public static boolean shouldDisplayWarning() {
+        return configuredOrDefault(ShuttershadowConfig.CLIENT_SPEC, ShuttershadowConfig.ENABLE_WARNING);
     }
 
 }

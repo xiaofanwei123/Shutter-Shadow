@@ -14,7 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
-/** 把data/shuttershadow/dimensio_filter/<维度命名空间>/<维度路径>.json映射到Exposure读取的虚拟滤镜路径。 */
+/** 把维度滤镜数据包映射到原生滤镜注册表，沿用原生附件纹理和颜色字段。 */
 public final class DimensionFilterResources {
     private static final FileToIdConverter DIMENSION_FILES = FileToIdConverter.json("dimension_filter");
     private static final FileToIdConverter EXPOSURE_FILES =

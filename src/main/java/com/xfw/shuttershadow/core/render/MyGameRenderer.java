@@ -36,7 +36,6 @@ import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 import java.util.Stack;
 
 // 仅供客户端使用。
-// Shuttershadow 第六轮：保留相机多世界渲染及恢复，撤销门户遮挡和准星分支。
 /** 目标世界渲染的状态保存/恢复中心。 */
 public class MyGameRenderer {
     public static final Minecraft client = Minecraft.getInstance();

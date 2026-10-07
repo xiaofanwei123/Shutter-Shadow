@@ -26,7 +26,7 @@ public final class DimensionFilterModels {
     private DimensionFilterModels() {
     }
 
-    /** 扫描本命名空间models/item/dimensio_filter中的JSON，把<维度命名空间>/<路径>解析为维度ID并注册额外模型。 */
+    /** 扫描维度滤镜模型目录，将命名空间和路径解析为维度编号并注册变体。 */
     public static void registerModels(ModelEvent.RegisterAdditional event) {
         Map<ResourceLocation, ModelResourceLocation> found = new HashMap<>();
         Minecraft.getInstance().getResourceManager()

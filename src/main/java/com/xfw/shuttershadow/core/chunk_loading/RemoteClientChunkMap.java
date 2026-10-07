@@ -20,7 +20,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import com.xfw.shuttershadow.util.CHelper;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
-import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.compat.SodiumInterface;
 import com.xfw.shuttershadow.access.IEMinecraftClient;
 import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
@@ -183,7 +182,7 @@ public class RemoteClientChunkMap extends ClientChunkCache {
                         worldChunk.getPos().x, worldChunk.getPos().z
                     ))
                     .append(Component.literal(" Report issue:"))
-                    .append(McHelper.getLinkText(PlatformBridge.getIssueLink()))
+                    .append(CHelper.getLinkText(PlatformBridge.getIssueLink()))
                     .withStyle(ChatFormatting.RED)
             );
             

@@ -8,7 +8,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
-// Shuttershadow 第六轮：只保留远景相机的区块视角坐标修正。
 /** 在额外世界渲染时修正原版地形查询使用的玩家坐标。 */
 @Mixin(value = LevelRenderer.class, priority = 1100)
 public class MixinLevelRenderer_Optional {

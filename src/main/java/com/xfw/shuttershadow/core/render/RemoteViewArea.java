@@ -1,5 +1,7 @@
 package com.xfw.shuttershadow.core.render;
 
+import com.xfw.shuttershadow.Shuttershadow;
+
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.client.Minecraft;
@@ -20,7 +22,6 @@ import org.apache.commons.lang3.Validate;
 import org.jetbrains.annotations.Nullable;
 import com.xfw.shuttershadow.core.ClientWorldLoader;
 import com.xfw.shuttershadow.core.CoreSettings;
-import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.access.IERenderSection;
 import com.xfw.shuttershadow.access.IEWorldRenderer;
 import com.xfw.shuttershadow.core.GcMonitor;
@@ -107,8 +108,8 @@ public class RemoteViewArea extends ViewArea {
         super(sectionBuilder, world, r, worldRenderer);
         factory = sectionBuilder;
 
-        minSectionY = McHelper.getMinSectionY(world);
-        endSectionY = McHelper.getMaxSectionYExclusive(world);
+        minSectionY = world.getMinSection();
+        endSectionY = world.getMaxSection();
     }
 
     /** 创建视区索引，渲染区段按需生成。 */
@@ -172,7 +173,7 @@ public class RemoteViewArea extends ViewArea {
     public RenderSection provideBuiltChunkByChunkPos(int cx, int cy, int cz) {
         Column column = provideColumn(ChunkPos.asLong(cx, cz));
         int offsetChunkY = Mth.clamp(
-                cy - McHelper.getMinSectionY(level), 0, McHelper.getYSectionNumber(level) - 1
+                cy - level.getMinSection(), 0, level.getSectionsCount() - 1
         );
         return column.sections[offsetChunkY];
     }
@@ -250,7 +251,7 @@ public class RemoteViewArea extends ViewArea {
         int sectionX = ChunkPos.getX(sectionPos);
         int sectionZ = ChunkPos.getZ(sectionPos);
 
-        int minY = McHelper.getMinY(level);
+        int minY = level.getMinBuildHeight();
 
         for (int offsetCY = 0; offsetCY < sectionGridSizeY; offsetCY++) {
             RenderSection builtChunk = factory.new RenderSection(
@@ -373,7 +374,7 @@ public class RemoteViewArea extends ViewArea {
     @Override
     protected RenderSection getRenderSectionAt(BlockPos pos) {
         int i = Mth.floorDiv(pos.getX(), 16);
-        int j = Mth.floorDiv(pos.getY() - McHelper.getMinY(level), 16);
+        int j = Mth.floorDiv(pos.getY() - level.getMinBuildHeight(), 16);
         int k = Mth.floorDiv(pos.getZ(), 16);
         if (j >= 0 && j < this.sectionGridSizeY) {
             i = Mth.positiveModulo(i, this.sectionGridSizeX);
@@ -382,7 +383,7 @@ public class RemoteViewArea extends ViewArea {
             RenderSection result = this.sections[sectionIndex];
 
             if (result == null) {
-                Helper.err("Null RenderChunk " + pos);
+                Shuttershadow.LOGGER.error("Null RenderChunk {}", pos);
                 return null;
             }
 

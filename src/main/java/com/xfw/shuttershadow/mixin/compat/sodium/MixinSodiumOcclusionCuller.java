@@ -7,7 +7,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
-// Shuttershadow 第六轮：远景相机禁用洞穴遮挡，玩家正常视角使用 Sodium 原值。
 /** 仅在相机远景渲染中关闭洞穴遮挡剔除。 */
 @Mixin(value = OcclusionCuller.class, remap = false)
 public class MixinSodiumOcclusionCuller {

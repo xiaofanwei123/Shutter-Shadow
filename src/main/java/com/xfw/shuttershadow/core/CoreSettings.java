@@ -4,8 +4,6 @@ package com.xfw.shuttershadow.core;
 import net.neoforged.bus.api.Event;
 import com.xfw.shuttershadow.util.MyTaskList;
 
-// Shuttershadow 第三轮裁剪：移除生成系统及管理命令独占的全局配置。
-// Shuttershadow 第四轮裁剪：移除无调用、无读取的旧开关。
 /** 保存内核运行配置及客户端任务队列。 */
 public class CoreSettings {
     
@@ -34,6 +32,5 @@ public class CoreSettings {
     
     
     
-    public static volatile boolean chunkPacketDebug = false;
     
 }

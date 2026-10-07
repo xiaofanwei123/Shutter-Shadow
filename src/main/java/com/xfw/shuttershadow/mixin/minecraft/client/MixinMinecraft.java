@@ -9,7 +9,6 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.neoforged.neoforge.common.NeoForge;
-import org.slf4j.Logger;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
@@ -27,8 +26,6 @@ import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
 /** 管理客户端远程世界更新、渲染性能采样及退出清理。 */
 @Mixin(Minecraft.class)
-// Shuttershadow 第四轮裁剪：移除完整 IP 模组的首次说明屏注入，保留渲染与世界生命周期。
-// Shuttershadow 第六轮：撤销自动穿门检测，保留远程世界 tick 与状态同步。
 public abstract class MixinMinecraft implements IEMinecraftClient {
     @Mutable
     @Shadow
@@ -46,10 +43,6 @@ public abstract class MixinMinecraft implements IEMinecraftClient {
     @Shadow
     @Final
     private RenderBuffers renderBuffers;
-    
-    @Shadow
-    @Final
-    private static Logger LOGGER;
     
     @Shadow private Thread gameThread;
     
@@ -99,18 +92,13 @@ public abstract class MixinMinecraft implements IEMinecraftClient {
     )
     private void onSetWorld(ClientLevel clientLevel, CallbackInfo ci) {
         if (ClientWorldLoader.getIsInitialized()) {
-            LOGGER.info("Client cleanup");
             NeoForge.EVENT_BUS.post(new ClientCleanupEvent());
 
             if (clientLevel == null) {
-                LOGGER.info("Client exit world");
                 NeoForge.EVENT_BUS.post(new ClientExitEvent());
             }
 
             ClientWorldLoader.cleanUp();
-        }
-        else {
-            LOGGER.info("Client world updated but not counted as cleanup");
         }
     }
     

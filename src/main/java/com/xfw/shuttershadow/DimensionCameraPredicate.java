@@ -9,50 +9,48 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.List;
 
-/** Exposure物品子谓词携带的来源维度→目标路由映射。 */
-public record DimensionCameraPredicate(Map<ResourceLocation, Route> routes)
+/** 为滤镜声明来源维度和各自比例，目标由物品组件统一指定。 */
+public record DimensionCameraPredicate(List<Source> routes)
         implements ItemSubPredicate {
     private static final Codec<Double> COORDINATE_SCALE_CODEC = Codec.DOUBLE.validate(scale ->
             Double.isFinite(scale) && scale > 0.0D ? DataResult.success(scale)
                     : DataResult.error(() -> "camera route coordinate_scale must be positive and finite"));
 
-    public static final Codec<Route> ROUTE_CODEC = RecordCodecBuilder.create(instance -> instance.group(
-            ResourceLocation.CODEC.fieldOf("target_dimension")
-                    .forGetter(Route::targetDimension),
-            COORDINATE_SCALE_CODEC.optionalFieldOf("coordinate_scale", Double.NaN)
-                    .forGetter(Route::coordinateScale)
-    ).apply(instance, Route::new));
+    public static final Codec<Source> SOURCE_CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            ResourceLocation.CODEC.fieldOf("source_dimension")
+                    .forGetter(Source::sourceDimension),
+            COORDINATE_SCALE_CODEC.optionalFieldOf("coordinate_scale", 1.0D)
+                    .forGetter(Source::coordinateScale)
+    ).apply(instance, Source::new));
 
     public static final Codec<DimensionCameraPredicate> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-            Codec.unboundedMap(ResourceLocation.CODEC, ROUTE_CODEC).validate(routes ->
-                            routes.isEmpty() ? DataResult.error(() -> "camera predicate routes cannot be empty")
-                                    : DataResult.success(routes))
+            SOURCE_CODEC.listOf().validate(routes -> hasUniqueSources(routes)
+                            ? DataResult.success(routes)
+                            : DataResult.error(() -> "camera predicate routes must contain unique source dimensions"))
                     .fieldOf("routes")
                     .forGetter(DimensionCameraPredicate::routes)
     ).apply(instance, DimensionCameraPredicate::new));
 
-    /** 紧凑构造器拒绝空路由和null项，并复制为保持顺序的只读Map。 */
+    /** 复制来源列表为只读快照，拒绝空列表或重复来源。 */
     public DimensionCameraPredicate {
-        if (routes == null || routes.isEmpty()) {
-            throw new IllegalArgumentException("camera predicate routes cannot be empty");
+        routes = List.copyOf(routes);
+        if (!hasUniqueSources(routes)) {
+            throw new IllegalArgumentException("camera predicate routes must contain unique source dimensions");
         }
-        Map<ResourceLocation, Route> copy = new LinkedHashMap<>();
-        routes.forEach((source, route) -> {
-            if (source == null || route == null) {
-                throw new IllegalArgumentException("camera predicate route cannot be null");
-            }
-            copy.put(source, route);
-        });
-        routes = Collections.unmodifiableMap(copy);
     }
 
-    /** 按来源维度查路由。 */
-    public Route routeFor(ResourceLocation sourceDimension) {
-        return sourceDimension == null ? null : routes.get(sourceDimension);
+    /** 每个来源只允许配置一次，避免列表顺序改变路由含义。 */
+    private static boolean hasUniqueSources(List<Source> routes) {
+        return !routes.isEmpty()
+                && routes.stream().map(Source::sourceDimension).distinct().count() == routes.size();
+    }
+
+    /** 读取当前来源维度的比例，未列出的来源不能使用此滤镜。 */
+    public Source routeFor(ResourceLocation sourceDimension) {
+        return sourceDimension == null ? null : routes.stream()
+                .filter(route -> sourceDimension.equals(route.sourceDimension())).findFirst().orElse(null);
     }
 
     /** 从Filter的子谓词集合找到本类型，找不到返回null。 */
@@ -71,16 +69,15 @@ public record DimensionCameraPredicate(Map<ResourceLocation, Route> routes)
         return true;
     }
 
-    /** 单条目标维度及比例记录。 */
-    public record Route(ResourceLocation targetDimension, double coordinateScale) {
-        /** 紧凑构造器拒绝null目标以及非正/无穷比例，允许NaN作为自动比例标记。 */
-        public Route {
-            if (targetDimension == null) {
-                throw new IllegalArgumentException("camera route target dimension cannot be null");
+    /** 单条来源维度配置，坐标比例省略时默认为一。 */
+    public record Source(ResourceLocation sourceDimension, double coordinateScale) {
+        /** 来源不可为空，比例必须为正数且有限。 */
+        public Source {
+            if (sourceDimension == null) {
+                throw new IllegalArgumentException("camera source dimension cannot be null");
             }
-            if (!Double.isNaN(coordinateScale)
-                    && (!Double.isFinite(coordinateScale) || coordinateScale <= 0.0D)) {
-                throw new IllegalArgumentException("camera route coordinate_scale must be positive");
+            if (!Double.isFinite(coordinateScale) || coordinateScale <= 0.0D) {
+                throw new IllegalArgumentException("camera source coordinate_scale must be positive and finite");
             }
         }
     }

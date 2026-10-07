@@ -1,6 +1,7 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
 
 
+import com.xfw.shuttershadow.Shuttershadow;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -11,8 +12,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import org.slf4j.Logger;
-import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -25,7 +24,6 @@ import com.xfw.shuttershadow.access.IEClientPlayNetworkHandler;
 import com.xfw.shuttershadow.access.IEPlayerPositionLookS2CPacket;
 import com.xfw.shuttershadow.network.CoreNetworkHandshake;
 import com.xfw.shuttershadow.core.teleportation.ClientTeleportationManager;
-import com.xfw.shuttershadow.util.Helper;
 import com.xfw.shuttershadow.util.CountDownInt;
 
 /** 处理多世界位置、载具、实体、时钟和方块预测同步。 */
@@ -39,10 +37,6 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
     /** Shadow 引用原乘客包处理方法，允许延迟任务再执行相同包。 */
     @Shadow
     public abstract void handleSetEntityPassengersPacket(ClientboundSetPassengersPacket entityPassengersSetS2CPacket_1);
-    
-    @Shadow
-    @Final
-    private static Logger LOGGER;
     
     /** 替换监听器 level 引用，重定向包/无缝换维时使原版 handler 在正确 ClientLevel 上运行。 */
     @Override
@@ -74,11 +68,6 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         Level playerWorld = player.level();
         
         if (packetDim != playerWorld.dimension()) {
-            LOGGER.info(
-                "[shuttershadow] Client accepted position packet in another dimension. Packet: {} {} {} {}. Player: {} {} {} {}",
-                packetDim.location(), packet.getX(), packet.getY(), packet.getZ(),
-                playerWorld.dimension().location(), player.getX(), player.getY(), player.getZ()
-            );
             
             ClientTeleportationManager.forceTeleportPlayer(
                 packetDim,
@@ -88,10 +77,6 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
 // 曾在此处短暂禁用客户端传送。
         }
         
-        LOGGER.info(
-            "[shuttershadow] Client accepted position packet {} {} {} {}",
-            packetDim.location(), packet.getX(), packet.getY(), packet.getZ()
-        );
     }
     
     private boolean isReProcessingPassengerPacket;
@@ -113,7 +98,6 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         Entity entity_1 = this.level.getEntity(entityPassengersSetS2CPacket_1.getVehicle());
         if (entity_1 == null) {
             if (!isReProcessingPassengerPacket) {
-                Helper.log("Re-processed riding packet");
                 CoreSettings.CLIENT_TASK_LIST.addTask(() -> {
                     isReProcessingPassengerPacket = true;
                     handleSetEntityPassengersPacket(entityPassengersSetS2CPacket_1);
@@ -138,7 +122,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         Entity entity = clientWorld.getEntity(id);
         if (entity == null) {
             if (LOG_LIMIT.tryDecrement()) {
-                LOGGER.warn("missing entity for data tracking {} {}", clientWorld, id);
+                Shuttershadow.LOGGER.warn("missing entity for data tracking {} {}", clientWorld, id);
             }
         }
         return entity;
@@ -191,47 +175,10 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         Entity existingEntity = level.getEntity(entityId);
         
         if (existingEntity != null && !existingEntity.getPassengers().isEmpty()) {
-            LOGGER.warn("[shuttershadow] Entity already exists and has passengers when accepting add-entity packet. Ignoring. {} {}", existingEntity, packet);
+            Shuttershadow.LOGGER.warn("[shuttershadow] Entity already exists and has passengers when accepting add-entity packet. Ignoring. {} {}", existingEntity, packet);
             ci.cancel();
         }
     }
     
-    // 用于调试。
-    /** 启用区块包调试时记录加载维度和区块坐标。 */
-    @Inject(
-        method = "handleLevelChunkWithLight",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V",
-            shift = At.Shift.AFTER
-        )
-    )
-    private void onHandleLevelChunkWithLight(
-        ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci
-    ) {
-        if (CoreSettings.chunkPacketDebug) {
-            LOGGER.info("Chunk Load Packet {} {} {}", level.dimension().location(), packet.getX(), packet.getZ());
-        }
-    }
     
-    // 用于调试。
-    /** 启用区块包调试时记录卸载维度和区块坐标。 */
-    @Inject(
-        method = "handleForgetLevelChunk",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V",
-            shift = At.Shift.AFTER
-        )
-    )
-    private void onHandleForgetLevelChunk(
-        ClientboundForgetLevelChunkPacket packet, CallbackInfo ci
-    ) {
-        if (CoreSettings.chunkPacketDebug) {
-            LOGGER.info(
-                "Chunk Unload Packet {} {} {}",
-                level.dimension().location(), packet.pos().x, packet.pos().z
-            );
-        }
-    }
 }

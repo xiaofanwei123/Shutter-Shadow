@@ -40,12 +40,10 @@ import com.xfw.shuttershadow.core.render.MyRenderHelper;
 import com.xfw.shuttershadow.core.render.VisibleSectionDiscovery;
 import com.xfw.shuttershadow.core.render.RenderStates;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
-import com.xfw.shuttershadow.util.Helper;
 
 /** 接入多世界地形、光照、帧缓冲及渲染资源管理。 */
 @SuppressWarnings("JavadocReference")
 @Mixin(value = LevelRenderer.class)
-// Shuttershadow 第六轮：仅保留远景相机区块、光照和渲染状态接线。
 public abstract class MixinLevelRenderer implements IEWorldRenderer {
     
     @Shadow
@@ -221,7 +219,6 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     @Inject(method = "allChanged", at = @At("HEAD"), cancellable = true)
     private void onReloadStarted(CallbackInfo ci) {
         if (WorldRenderInfo.isRendering()) {
-            Helper.log("world renderer reloading cancelled during portal rendering");
             ci.cancel();
         }
     }

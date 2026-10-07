@@ -3,10 +3,7 @@ package com.xfw.shuttershadow.util;
 
 import it.unimi.dsi.fastutil.objects.ObjectList;
 import org.apache.commons.lang3.mutable.MutableBoolean;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.BiPredicate;
@@ -14,26 +11,9 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 // 通用辅助方法。
-// Shuttershadow 第三轮修改：迁入原调试命令的 MiB 换算，供性能监测独立使用。
-/** 共享日志、时间/容量换算、异常包装与fastutil列表算法。 */
+/** 提供时间/容量换算、异常包装与fastutil列表算法。 */
 public class Helper {
-    
-    public static final Logger LOGGER = LogManager.getLogger("shuttershadow");
-    
-    // TODO use separate logger for each class
-    /** 以信息级别记录日志。 */
-    @Deprecated
-    public static void log(Object str) {
-        LOGGER.info(str);
-    }
-    
-    // TODO use separate logger for each class
-    /** 以错误级别记录日志。 */
-    @Deprecated
-    public static void err(Object str) {
-        LOGGER.error(str);
-    }
-    
+
     /** 将字节数换算为兆字节，保留整数除法行为。 */
     public static long toMiB(long bytes) {
         return bytes / 1024L / 1024L;

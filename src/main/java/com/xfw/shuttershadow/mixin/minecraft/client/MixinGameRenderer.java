@@ -6,6 +6,7 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LightTexture;
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import net.neoforged.neoforge.common.NeoForge;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -25,7 +26,6 @@ import com.xfw.shuttershadow.client.ImmersiveCameraClient;
 
 /** 接入相机远景绘制，并管理多世界渲染状态和生命周期。 */
 @Mixin(GameRenderer.class)
-// Shuttershadow 第六轮：撤销物理门渲染与自动穿门，保留相机变换和多世界状态。
 public abstract class MixinGameRenderer implements IEGameRenderer {
     @Shadow
     @Final
@@ -47,6 +47,12 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
     @Inject(method = "renderLevel", at = @At("HEAD"), cancellable = true)
     private void shuttershadow$renderImmersiveCamera(DeltaTracker deltaTracker, CallbackInfo ci) {
         if (ImmersiveCameraClient.render(deltaTracker)) ci.cancel();
+    }
+
+    /** 远景天空与地形雾采用相机视距，普通世界保留原渲染距离。 */
+    @ModifyReturnValue(method = "getRenderDistance", at = @At("RETURN"))
+    private float shuttershadow$cameraFogDistance(float original) {
+        return WorldRenderInfo.isRendering() ? WorldRenderInfo.getRenderDistance() * 16.0F : original;
     }
 
     // 相机远景渲染期间保留主世界准星目标，避免在临时世界中重算。

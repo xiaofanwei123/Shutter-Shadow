@@ -1,5 +1,6 @@
 package com.xfw.shuttershadow.core.chunk_loading;
 import com.xfw.shuttershadow.api.ChunkLoader;
+import com.xfw.shuttershadow.ShuttershadowConfig;
 
 
 import com.mojang.logging.LogUtils;
@@ -34,7 +35,6 @@ public class RemoteChunkTracking {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     public static final int updateInterval = 13;
-    public static final int defaultDelayUnloadGenerations = 4;
 
     /** 注册每服务端tick更新与ServerCleanup清静态集合。 */
     public static void init() {
@@ -207,7 +207,6 @@ public class RemoteChunkTracking {
                     } else {
                         int oldDistance = record.distanceToSource;
                         if (record.lastWatchGeneration == generationCounter) {
-                            // 同一轮中再次更新该记录。
                             if (distanceToSource < oldDistance) {
                                 record.distanceToSource = distanceToSource;
                                 playerInfo.markPendingLoading(record);
@@ -215,7 +214,6 @@ public class RemoteChunkTracking {
 
                             record.isBoundary = (record.isBoundary && isBoundary);
                         } else {
-                            // 本轮首次更新该记录。
                             playerInfo.loadedChunks++;
                             if (distanceToSource < oldDistance) {
                                 playerInfo.markPendingLoading(record);
@@ -312,24 +310,20 @@ public class RemoteChunkTracking {
     }
 
     // 玩家加载区块较多时，提前释放不再观察的区块。
-    /** 加载区块越多越快卸载：>2000延1代、>1200延2代，其余默认。 */
+    /** 按服务端配置延迟卸载，区块较多时缩短至最多2代或1代。 */
     private static int getDelayUnloadGenerationForPlayer(ServerPlayer player) {
-        PlayerChunkLoading playerInfo = getPlayerInfo(player);
-        if (playerInfo == null) {
-            return defaultDelayUnloadGenerations;
-        }
-
-        int loadedChunks = playerInfo.loadedChunks;
+        int delayUnloadGenerations = ShuttershadowConfig.delayUnloadGenerations();
+        int loadedChunks = getPlayerInfo(player).loadedChunks;
 
         if (loadedChunks > 2000) {
             return 1;
         }
 
         if (loadedChunks > 1200) {
-            return 2;
+            return Math.min(2, delayUnloadGenerations);
         }
 
-        return defaultDelayUnloadGenerations;
+        return delayUnloadGenerations;
     }
 
     /** 遍历全局loader标记需要的票据及保活集合，删除不存在维度的loader。 */

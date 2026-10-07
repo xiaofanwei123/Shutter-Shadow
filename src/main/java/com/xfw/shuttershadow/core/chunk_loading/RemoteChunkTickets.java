@@ -24,7 +24,7 @@ import org.slf4j.Logger;
 import com.xfw.shuttershadow.core.CoreSettings;
 import com.xfw.shuttershadow.access.IEChunkMap;
 import com.xfw.shuttershadow.access.IEWorld;
-import com.xfw.shuttershadow.core.CoreConfig;
+import com.xfw.shuttershadow.ShuttershadowConfig;
 import com.xfw.shuttershadow.util.Helper;
 
 import java.util.ArrayList;
@@ -192,7 +192,7 @@ public class RemoteChunkTickets {
     
     /** 远区块加载开关开启时为区块添加相机TICKET_TYPE及加载等级。 */
     private static void addTicket(DistanceManager distanceManager, long chunkPos) {
-        if (!CoreConfig.ENABLE_REMOTE_CHUNK_LOADING.get()) {
+        if (!ShuttershadowConfig.ENABLE_REMOTE_CHUNK_LOADING.get()) {
             return;
         }
         

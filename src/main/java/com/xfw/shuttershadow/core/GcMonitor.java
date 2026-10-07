@@ -10,8 +10,6 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 import com.xfw.shuttershadow.util.CHelper;
 import com.xfw.shuttershadow.core.CoreSettings;
-import com.xfw.shuttershadow.util.WorldContextHelper;
-import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.core.CoreConfig;
 import com.xfw.shuttershadow.core.PlatformBridge;
 import com.xfw.shuttershadow.util.Helper;
@@ -26,7 +24,6 @@ import java.util.WeakHashMap;
 // 运行时没有可直接读取垃圾回收暂停时长的接口。
 // 垃圾回收日志也无法在程序内部直接获取，
 // 因此这里只进行近似测量。
-// Shuttershadow 第三轮修改：仅将 MiB 换算迁至公共工具，保留内存监测与告警行为。
 /** 监测垃圾回收停顿和堆内存压力。 */
 public class GcMonitor {
     private static boolean memoryNotEnough = false;
@@ -59,13 +56,13 @@ public class GcMonitor {
             CoreSettings.CLIENT_TASK_LIST.addTask(MyTaskList.withDelayCondition(
                 () -> Minecraft.getInstance().level == null,
                 MyTaskList.oneShotTask(() -> {
-                    if (CoreConfig.shouldDisplayWarning("low_max_memory")) {
+                    if (CoreConfig.shouldDisplayWarning()) {
                         CHelper.printChat(
                             Component.translatable("shuttershadow.core.low_max_memory", maxMemoryMB)
                                 .withStyle(ChatFormatting.RED)
-                                .append(McHelper.getLinkText(LINK))
+                                .append(CHelper.getLinkText(LINK))
                                 .append(
-                                    WorldContextHelper.getDisableWarningText("low_max_memory")
+                                    CHelper.getDisableWarningText()
                                 )
                         );
                     }
@@ -158,7 +155,7 @@ public class GcMonitor {
     // 仅供客户端使用。
     /** 配置允许时显示内存不足提醒。 */
     private static void informMemoryNotEnoughClient() {
-        if (!CoreConfig.shouldDisplayWarning("memory_not_enough")) return;
+        if (!CoreConfig.shouldDisplayWarning()) return;
         Minecraft client = Minecraft.getInstance();
         if (client.player != null) {
             if (client.player.tickCount > 40) {
@@ -168,7 +165,7 @@ public class GcMonitor {
                         .replaceFirst("^\\[[^\\]]*\\]", "[shuttershadow]");
                     CHelper.printChat(
                         Component.literal(message).append(
-                            McHelper.getLinkText(LINK)
+                            CHelper.getLinkText(LINK)
                         )
                     );
                 }

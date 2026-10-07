@@ -16,7 +16,6 @@ import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
 /** 提供相机状态访问，并按远景上下文修正观察位置。 */
 @Mixin(Camera.class)
-// Shuttershadow 第六轮：仅保留远景相机位置与状态访问，撤销穿门实体视角处理。
 public abstract class MixinCamera implements IECamera {
     
     @Shadow

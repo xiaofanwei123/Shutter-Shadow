@@ -10,7 +10,6 @@ import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
-import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.network.PacketRedirection;
 
 import java.util.Set;
@@ -21,7 +20,7 @@ public class WorldInfoSender {
     public static void init() {
         NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class, event -> {
             event.getServer().getProfiler().push("shuttershadow_send_camera_world_info");
-            if (McHelper.getServerGameTime() % 100 == 42) {
+            if (event.getServer().overworld().getGameTime() % 100 == 42) {
                 for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
                     Set<ResourceKey<Level>> visibleDimensions = RemoteChunkTracking.getVisibleDimensions(player);
 

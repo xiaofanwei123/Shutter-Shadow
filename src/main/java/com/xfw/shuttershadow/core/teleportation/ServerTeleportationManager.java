@@ -22,7 +22,6 @@ import com.xfw.shuttershadow.access.IEEntity;
 import com.xfw.shuttershadow.access.IEChunkMap;
 import com.xfw.shuttershadow.access.IETrackedEntity;
 import com.xfw.shuttershadow.access.IEServerPlayerEntity;
-import com.xfw.shuttershadow.core.CoreConfig;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -71,12 +70,6 @@ public class ServerTeleportationManager {
             return;
         }
 
-        if (CoreConfig.SERVER_TELEPORT_LOGGING.get()) {
-            LOGGER.info(
-                "Force teleporting {} to {} {}",
-                player, dimensionTo.location(), newPos
-            );
-        }
 
         ServerLevel fromWorld = (ServerLevel) player.level();
         ServerLevel toWorld = player.server.getLevel(dimensionTo);
@@ -145,7 +138,7 @@ public class ServerTeleportationManager {
         PacketRedirection.withForceRedirect(toWorld, () -> toWorld.addDuringTeleport(player));
         
         if (vehicle != null) {
-            Vec3 offset = McHelper.getVehicleOffsetFromPassenger(vehicle, player);
+            Vec3 offset = player.getVehicleAttachmentPoint(vehicle);
             Vec3 vehiclePos = player.position().add(offset);
             vehicle = teleportVehicleAcrossDimensions(
                 vehicle,
@@ -162,16 +155,6 @@ public class ServerTeleportationManager {
             McHelper.adjustVehicle(player);
         }
         
-        if (CoreConfig.SERVER_TELEPORT_LOGGING.get()) {
-            LOGGER.info(
-                "{} :: ({} {} {} {})->({} {} {} {})",
-                player.getName().getContents(),
-                fromWorld.dimension().location(),
-                oldPos.x(), oldPos.y(), oldPos.z(),
-                toWorld.dimension().location(),
-                (int) player.getX(), (int) player.getY(), (int) player.getZ()
-            );
-        }
         
         
         // 更新跨维度相关进度。

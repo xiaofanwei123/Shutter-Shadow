@@ -96,7 +96,7 @@ public class ClientWorldLoader {
             if (helper.world != CLIENT.level) {
                 if (helper.lightmapTexture == CLIENT.gameRenderer.lightTexture()) {
                     assert CLIENT.level != null;
-                    LOGGER.info(
+                    LOGGER.warn(
                         "Lightmap Texture Conflict {} {}",
                         helper.world.dimension().location(),
                         CLIENT.level.dimension().location()
@@ -107,7 +107,6 @@ public class ClientWorldLoader {
         }
         if (lightmapTextureConflict) {
             disposeRenderHelpers();
-            LOGGER.info("Refreshed Lightmaps");
         }
         
     }
@@ -354,7 +353,6 @@ public class ClientWorldLoader {
             WORLD_RENDERER_MAP.put(dimension, worldRenderer);
             registered = true;
 
-            LOGGER.info("Client World Created {}", dimension.location());
         }
         catch (Throwable e) {
             // 未注册的渲染器不会进入退出清理；创建失败时立即释放它持有的资源。
@@ -406,10 +404,6 @@ public class ClientWorldLoader {
     @SuppressWarnings("Convert2MethodRef")
     public static void _onWorldRendererReloaded() {
         Validate.isTrue(CLIENT.isSameThread());
-        if (CLIENT.level != null) {
-            LOGGER.info("WorldRenderer reloaded {}", CLIENT.level.dimension().location());
-        }
-        
         if (isReloadingOtherWorldRenderers) {
             return;
         }

@@ -5,11 +5,20 @@ import net.minecraft.client.renderer.FogRenderer;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import com.xfw.shuttershadow.core.render.FogRendererContext;
+import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
-/** 保存和恢复各维度的雾颜色及渐变状态。 */
+/** 保存各维度雾颜色状态，并让远景雾颜色匹配相机视距。 */
 @Mixin(value = FogRenderer.class, priority = 1100)
 public class MixinFogRenderer {
+    /** 远景雾颜色也按相机视距混合，与天空和地形雾保持一致。 */
+    @ModifyVariable(method = "setupColor", at = @At("HEAD"), argsOnly = true, ordinal = 0)
+    private static int shuttershadow$cameraFogColorDistance(int original) {
+        return WorldRenderInfo.isRendering() ? WorldRenderInfo.getRenderDistance() : original;
+    }
+
     @Shadow
     private static float fogRed;
     @Shadow

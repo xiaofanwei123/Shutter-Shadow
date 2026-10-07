@@ -46,7 +46,7 @@ public static @Nullable ServerPlayer teleportPlayer(
 
 该入口沿用强制传送行为，**不触发 NeoForge 可取消的维度旅行事件**。它不自动选择安全落点、不避开方块、不检查世界边界、不弹出同意界面，也不拍照。玩家维度胶卷自己的名单、保护和客户端清理由相机业务层负责；外部 API 不公开绕过保护的作用域。
 
-玩家正在乘坐的**直接载具**，例如船或矿车，会随玩家跨维并恢复乘坐。其他乘客留在原维度；不会递归搬运整棵乘客树。其他原维度观察者会清除旧载具，当前传送玩家保留客户端载具用于无缝交接。普通实体传送会解除骑乘关系，没有玩家的自动携带规则。不要把已跨维重建的旧实体引用继续用于后续操作。
+玩家正在乘坐的**直接载具**，例如船或矿车，会随玩家跨维并恢复乘坐。其他乘客留在原维度；不会递归搬运整棵乘客树。其他原维度观察者会清除旧载具，当前传送玩家保留客户端载具用于无缝交接。普通实体跨维传送会解除骑乘关系，同维传送不主动解除；它们没有玩家的自动携带规则。不要把已跨维重建的旧实体引用继续用于后续操作。
 
 ### 可直接使用的示例
 
@@ -118,7 +118,7 @@ API 自身允许半径 0；相机配置的 3～32 是业务上限范围，不是
 | --- | --- |
 | `new ChunkLoader(dimension, x, z, radius)` | 只保存不可变区域，不触发区块加载。空维度抛 `NullPointerException`；负半径、`Integer.MAX_VALUE` 半径或边界溢出 int 坐标抛 `IllegalArgumentException`。 |
 | `dimension()`、`x()`、`z()`、`radius()` | record 自动生成的字段读取器。 |
-| `isFullyLoaded(server)` | 必须在所属服务器线程调用。检查区域全部区块的服务端完整 tick/实体加载状态，维度不存在返回 `false`；不主动加载、不阻塞，也不检查客户端收包、地形编译、光照或截图是否完成。 |
+| `isFullyLoaded(MinecraftServer server)` | 必须在所属服务器线程调用。检查每个区块已有 `ChunkHolder.getTickingChunk()`，且 `ServerLevel.areEntitiesLoaded(...)` 为真；维度不存在返回 `false`。不主动加载、不阻塞，不单独验证实体 ticking future，也不检查客户端收包、地形编译、光照或截图是否完成。 |
 | `foreachChunkPos(consumer)` | 按 X 偏移外层、Z 偏移内层的顺序枚举包含边界的区域，传入维度、区块 X/Z、与中心的切比雪夫距离 `max(abs(dx), abs(dz))`；空 consumer 抛 `NullPointerException`。 |
 | `toString()` | 输出 `(维度ID x z radius)`，便于日志记录。 |
 | `equals(...)`、`hashCode()` | record 按值比较，可用于区域比较；不能用同值新对象替代注册时的对象进行释放。 |
@@ -129,6 +129,13 @@ API 自身允许半径 0；相机配置的 3～32 是业务上限范围，不是
 ## 4. 额外区块订阅：ChunkLoading
 
 ### 四个公共方法
+
+```java
+public static void addGlobalChunkLoader(MinecraftServer server, ChunkLoader loader);
+public static void removeGlobalChunkLoader(MinecraftServer server, ChunkLoader loader);
+public static void addChunkLoaderForPlayer(ServerPlayer player, ChunkLoader loader);
+public static void removeChunkLoaderForPlayer(ServerPlayer player, ChunkLoader loader);
+```
 
 | 方法 | 加载与同步行为 |
 | --- | --- |
@@ -182,12 +189,22 @@ API 不会自动读取相机专用 `max_view_distance` 来裁剪外部 loader。
 
 ### 全部公共方法
 
+```java
+public static ItemStack create(ResourceLocation targetDimension);
+public static @Nullable ResourceLocation target(ItemStack filter);
+public static @Nullable Route resolve(
+        @Nullable RegistryAccess registries, ItemStack filter, ResourceLocation sourceDimension);
+public static double horizontalScale(@Nullable Route route, Level source, Level target);
+public static Vec3 mapAbsolute(Vec3 position, double scale);
+public static Vec3 mapRelative(Vec3 delta, Vec3 targetOrigin, double scale, double yOffset);
+```
+
 | 方法 | 输入、输出和边界 |
 | --- | --- |
 | `create(ResourceLocation targetDimension)` | 创建数量为 1 的 `shuttershadow:dimension_filter`，写入目标组件。空目标抛 `NullPointerException`；不会检查目标维度或路由是否存在。需要物品注册已完成。 |
 | `target(ItemStack filter)` | 只读取本模组滤镜的 `shuttershadow:dimension_filter_target` 组件；null、其他物品、未指定目标返回 `null`。这不是完整路由解析。 |
-| `resolve(@Nullable RegistryAccess registries, ItemStack filter, ResourceLocation sourceDimension)` | 使用 Exposure 的完整物品谓词选择滤镜条目，再取当前来源维度的路由；没有有效路由返回 `null`。null/空物品或空来源返回 `null`。注册表未就绪、异常或没有可用谓词路由时使用本地路由文件回退。 |
-| `horizontalScale(@Nullable Route route, Level source, Level target)` | 返回实际 X/Z 倍率。显式坐标比例为 `source.dimensionType().coordinateScale() / route.coordinateScale()`；路由为空或比例省略时使用两个维度类型的原生传送倍率。 |
+| `resolve(@Nullable RegistryAccess registries, ItemStack filter, ResourceLocation sourceDimension)` | 读取目标组件，以 Exposure 的首个完整物品谓词匹配条目为准：省略路由子谓词时比例为 `1`；显式路由只允许其列出的来源。null/空物品、空来源、缺少目标组件、目标与来源相同或显式路由不允许当前来源时返回 `null`。注册表未就绪、解析出现运行时异常或没有匹配条目时使用本地路由文件回退。 |
+| `horizontalScale(@Nullable Route route, Level source, Level target)` | 返回实际 X/Z 倍率：有限配置比例时为 `source.dimensionType().coordinateScale() / route.coordinateScale()`。只有路由为 `null` 或 Java 调用方显式构造比例为 `NaN` 的路由时，使用两个维度类型的原生传送倍率；数据包省略比例会解析成 `1`。 |
 | `mapAbsolute(Vec3 position, double scale)` | 返回 `(position.x*scale, position.y, position.z*scale)`。保留脚底 Y，不加眼睛偏移。 |
 | `mapRelative(Vec3 delta, Vec3 targetOrigin, double scale, double yOffset)` | 返回 `targetOrigin + (delta.x*scale, delta.y+yOffset, delta.z*scale)`，用于固定取景基准后的相对位移。 |
 
@@ -201,11 +218,26 @@ API 不会自动读取相机专用 `max_view_distance` 来裁剪外部 loader。
 public record Route(ResourceLocation filter, ResourceLocation dimension, double coordinateScale)
 ```
 
-`filter()` 是**物品注册 ID**，例如 `shuttershadow:dimension_filter`；不是 Exposure 滤镜数据条目 ID。`dimension()` 是解析后的实际目标，允许与物品用于选择变体的目标组件不同。`coordinateScale()` 是**目标坐标尺度**，下界通常为 `8`，不是实际乘数；`NaN` 表示省略比例、改用目标维度类型。
+`filter()` 是**物品注册 ID**，例如 `shuttershadow:dimension_filter`；不是 Exposure 滤镜数据条目 ID。`resolve()` 返回的 `dimension()` 等于物品的目标组件，不从来源路由中读取另一目标。Java 调用方直接构造 record 时可自行指定目标。
+
+`coordinateScale()` 是**目标坐标尺度**，下界通常为 `8`，不是实际乘数。当前数据包和本地 JSON 省略该字段都得到 `1`。只有 Java 调用方显式传入 `NaN` 时，`horizontalScale()` 才改用目标维度类型的尺度。
 
 构造时 filter/dimension 为空抛 `NullPointerException`；比例除 NaN 之外必须为有限正数，否则抛 `IllegalArgumentException`。record 提供不可变字段读取、按值相等和哈希。
 
-主世界坐标尺度 1，下界坐标尺度 8，因此主世界→下界 X/Z 乘 `1/8`，下界→主世界乘 `8`。Y 保持不变。数据包中显式写 `coordinate_scale: 8` 是指定目标尺度，而不是让所有坐标乘 8。
+实际倍率的计算为：
+
+```text
+X/Z 倍率 = 来源维度类型 coordinate_scale ÷ 滤镜来源条目的 coordinate_scale
+```
+
+| 来源 | 目标 | 滤镜配置的目标尺度 | 实际 X/Z 倍率 |
+| --- | --- | --- | --- |
+| 主世界（类型尺度 1） | 下界 | 8 | 1/8 |
+| 下界（类型尺度 8） | 主世界 | 省略，默认为 1 | 8 |
+| 主世界（类型尺度 1） | 末地 | 省略，默认为 1 | 1 |
+| 下界（类型尺度 8） | 末地 | 省略，默认为 1 | 8 |
+
+Y 保持不变。省略比例只代表**配置目标尺度为 1**，并不保证任意来源维度的实际倍率都为 1。自定义目标维度的类型尺度也不会覆盖数据包缺省值；需要使用其特定尺度时应明确填写。
 
 ### 从滤镜路由传送的完整例子
 
@@ -257,7 +289,7 @@ assets/shuttershadow/models/item/dimension_filter/example/moon/inner.json
 
 模型是资源包内容，路由是数据包内容，两者使用相同目标路径；目标世界本身必须由其他数据包或模组注册。内置统一滤镜的物品 ID 是 `shuttershadow:dimension_filter`，组件 `shuttershadow:dimension_filter_target` 储存目标 ID。
 
-### 可用 JSON 示例
+### 简写：所有其他维度可用，目标尺度默认 1
 
 放到 `data/shuttershadow/dimension_filter/example/moon/inner.json`：
 
@@ -267,38 +299,71 @@ assets/shuttershadow/models/item/dimension_filter/example/moon/inner.json
     "items": "shuttershadow:dimension_filter",
     "components": {
       "shuttershadow:dimension_filter_target": "example:moon/inner"
-    },
-    "predicates": {
-      "shuttershadow:camera_dimension": {
-        "routes": {
-          "minecraft:overworld": {
-            "target_dimension": "example:moon/inner"
-          },
-          "minecraft:the_nether": {
-            "target_dimension": "example:moon/inner"
-          }
-        }
-      }
     }
   },
+  "attachment_texture": "exposure:textures/gui/filter/stained_glass.png",
+  "attachment_tint": "78A7FF",
   "shader": "shuttershadow:shaders/post/neutral.json"
 }
 ```
 
-`routes` 必须非空，以**来源维度**为键，每条必填 `target_dimension`。省略 `coordinate_scale` 就使用实际目标维度类型尺度；显式字段必须是有限正数。例如下界路由：
+目标来自相机中**实际滤镜物品栈**的 `shuttershadow:dimension_filter_target` 组件。上例用组件谓词只选中月球滤镜变体；不写 `predicates` 就允许从任意其他来源维度使用，配置目标尺度固定为 `1`。来源已经是 `example:moon/inner` 时，不打开同维度远景。
+
+只在 JSON 谓词写目标，不会自动替普通物品补上组件；API 创建的滤镜、创造栏变体或自行给出的物品栈也必须携带该组件。
+
+### 完整写法：来源白名单和各来源的目标尺度
+
+内置下界滤镜位于 `data/shuttershadow/dimension_filter/minecraft/the_nether.json`：
 
 ```json
 {
-  "target_dimension": "minecraft:the_nether",
-  "coordinate_scale": 8.0
+  "predicate": {
+    "items": "shuttershadow:dimension_filter",
+    "components": {
+      "shuttershadow:dimension_filter_target": "minecraft:the_nether"
+    },
+    "predicates": {
+      "shuttershadow:camera_dimension": {
+        "routes": [
+          {
+            "source_dimension": "minecraft:overworld",
+            "coordinate_scale": 8.0
+          },
+          {
+            "source_dimension": "minecraft:the_end",
+            "coordinate_scale": 8.0
+          }
+        ]
+      }
+    }
+  },
+  "attachment_texture": "exposure:textures/gui/filter/stained_glass.png",
+  "attachment_tint": "5E0AC7",
+  "shader": "shuttershadow:shaders/post/neutral.json"
 }
 ```
 
-`shader` 是 Exposure 滤镜的后处理资源，不是 Iris 光影包。`shuttershadow:camera_dimension` 只携带路由元数据；实际物品选择仍由外层 `items`、`components` 和其他完整谓词决定。自定义普通物品也可通过 Exposure 滤镜格式提供路由，但本模组 `target()` 只读取自己的统一维度滤镜。
+| 字段 | 当前含义 |
+| --- | --- |
+| `predicate.items` | Exposure 滤镜的物品选择条件，统一维度滤镜为 `shuttershadow:dimension_filter`。 |
+| `predicate.components.shuttershadow:dimension_filter_target` | 用目标组件选中对应变体；实际路由目标读取滤镜物品栈的同名组件。 |
+| `predicate.predicates.shuttershadow:camera_dimension` | 可省略。省略时所有不同来源维度可用，目标尺度为 `1`；提供时按其来源白名单解析。 |
+| `routes` | **非空数组**，每个来源维度只能出现一次。旧对象式路由不支持。 |
+| `source_dimension` | 必填，表示持有／操作相机时所在的来源维度，不是滤镜目标。 |
+| `coordinate_scale` | 每条来源可省略，默认 `1`；显式值必须为有限正数。表示该来源观察目标时采用的目标尺度，真实倍率见上一节。 |
+| `attachment_texture` | Exposure 相机附件界面中的滤镜镜片纹理；示例复用 Exposure 彩色玻璃纹理。 |
+| `attachment_tint` | 镜片纹理颜色，示例使用不含 `#` 的六位十六进制字符串；不修改手持物品模型，也不将照片染成该颜色。 |
+| `shader` | Exposure 的照片后处理资源，不是 Iris 光影包；示例使用本模组中性的后处理资源。 |
+
+`target_dimension` 不再出现在来源条目中，目标只需在物品组件声明一次。内置主世界、末地滤镜使用简写；下界滤镜使用显式来源数组，目标尺度为 `8`。
+
+`shuttershadow:camera_dimension` 子谓词只携带路由元数据，其 `matches()` 返回 `true`；实际物品筛选仍由外层完整谓词决定。自定义普通物品也可接入，但物品栈必须携带本模组目标组件并匹配 Exposure 滤镜条目；本模组 `target()` 辅助方法仍只识别自己的统一维度滤镜，内部 `resolve()` 可解析其他携带组件的物品。
 
 路由解析保持 Exposure 的**首个完整物品谓词匹配**语义，不会跳过先匹配的普通滤镜去找后续维度滤镜。缓存只保存注册表快照的候选条目列表，每次仍判断物品栈全部条件；不缓存可变相机/滤镜的匹配结果。
 
-首个匹配条目没有当前来源路由时，解析仍会尝试本地 JSON 回退。因此“从数据包中省略一条来源路由”不必然等于禁用该来源，原版三维度可能被本地默认表补上；需要禁用时也删除本地回退表中的对应路由。
+首个匹配条目有显式来源数组、却没有当前来源时，**直接返回无路由**，不会用本地 JSON 回退重新启用。因此删除显式数组中的一条来源即可禁止该来源使用此滤镜；若想允许所有其他来源，应整体省略该路由子谓词，不能写空数组。
+
+只有注册表未就绪、读取／解析出现运行时异常或没有任何完整谓词匹配时，才尝试本地 JSON。缺少物品目标组件或目标与当前维度相同，在查询注册表和本地文件之前就会拒绝。
 
 ### 与 Exposure 注册表的关系
 
@@ -306,9 +371,9 @@ assets/shuttershadow/models/item/dimension_filter/example/moon/inner.json
 
 Exposure 标准 `data/<namespace>/exposure/filter/*.json` 仍由原生格式加载。标准目录和新目录产生同 ID 时按数据包堆叠优先级选择；同一包同优先级时新目录优先。文件仍按原生 ResourceLocation 排序，客户端 known-pack 本地读取也复用目录映射。
 
-本模组**不兼容旧维度滤镜目录或旧谓词 ID**。这与 Exposure 自身的标准目录是不同事项：标准 Exposure 数据包仍可使用。修改动态注册表条目后重新进入世界；专用服务器重新启动。新增目标模型属于客户端资源包，需让客户端获得对应资源。
+本模组**不兼容旧维度滤镜目录、旧谓词 ID 或旧对象式 routes**。这与 Exposure 自身的标准目录是不同事项：标准 Exposure 数据包仍可使用。修改动态注册表条目后重新进入世界；专用服务器重新启动。新增目标模型属于客户端资源包，需让客户端获得对应资源。
 
-内置新目标可被创造栏自动列出，但条目的外层 `items` 必须显式包含统一维度滤镜，且包含本模组路由谓词；创造栏按这些路由的目标维度去重生成滤镜。
+新目标可被创造栏自动列出：条目外层 `items` 集合需实际包含统一维度滤镜，`components` 明确匹配目标组件。创造栏按组件目标去重生成滤镜，**不要求含路由子谓词**，因此简写同样有效。只写范围更宽的组件子谓词、没有明确目标组件匹配值时，创造栏不能据此枚举具体目标。
 
 ## 7. 配置文件与作用域
 
@@ -318,8 +383,8 @@ NeoForge 原生配置界面从模组列表进入，不依赖 Cloth Config。**�
 | --- | --- | --- |
 | `shuttershadow-server.toml` | `SERVER` | 当前 NeoForge 默认在实例 `config/`；已有世界 `serverconfig/shuttershadow-server.toml` 时世界文件优先。服务器权威，连接世界时由 NeoForge 同步。 |
 | `config/shuttershadow-client.toml` | `CLIENT` | 当前客户端个人设置；支架同意偏好由本模组另发消息同步到服务器。 |
-| `config/shuttershadow-core.toml` | `COMMON` | 每个物理端各自本地加载，不随服务器同步。客户端配置控制本机渲染和提醒；服务端配置控制本机服务端票据、握手、日志。单人主机两种职责位于同一进程。 |
-| `config/shuttershadow_dimensions.json` | 本模组 JSON 回退路由 | 本地按文件修改时间重读，不是 NeoForge 同步配置。优先使用 Exposure 数据包；用于注册表未就绪或无可用谓词路由时。多人统一规则优先发数据包。 |
+| `config/shuttershadow-core.toml` | `COMMON` | 每个物理端各自本地加载，不随服务器同步。客户端配置控制本机渲染和提醒；服务端配置控制本机服务端票据和日志。单人主机两种职责位于同一进程。 |
+| `config/shuttershadow_dimensions.json` | 本模组 JSON 回退路由 | 本地按文件修改时间重读，不是 NeoForge 同步配置。用于注册表未就绪、解析出现运行时异常或没有匹配条目时；不覆盖已匹配条目的显式来源限制。多人统一规则优先发数据包。 |
 
 内核旧 JSON 不读取、不迁移。当前已有 TOML 数值不会因为默认值修改而自动重置。
 
@@ -329,11 +394,15 @@ NeoForge 原生配置界面从模组列表进入，不依赖 Cloth Config。**�
 | --- | --- | --- |
 | `dimension_camera.max_view_distance` | **8**；**3～32 区块半径** | 统一限制手持和手动支架的目标维度订阅与绘制。实际距离还取客户端请求视距和服务器视距的较小值；不是区块总数，不修改普通视频视距。 |
 | `camera_stand.stand_player_radius` | 8；1～64 方块 | 搜索原维度支架附近可能出镜的玩家，然后应用视锥、焦距、遮挡及个人传送同意。影响手动和红石支架玩家胶卷名单，不是目标画面视距。 |
-| `mob_dimension_film.capture_radius` | **16**；**1～16 方块** | 扩展目标相机方块搜索盒的 X/Y/Z，再筛选生物；手持、手动支架、红石支架共用，不按取景视距缩减。 |
+| `mob_dimension_film.capture_radius` | **16**；**1～32 方块** | 扩展目标相机方块搜索盒的 X/Y/Z，再筛选生物；手持、手动支架、红石支架共用，不按取景视距缩减。 |
 
 服务端相机上限通过 `RemoteSceneStartS2C.maxRenderDistance` 告知客户端，服务端同时按上限限制真实区块订阅；客户端绘制也取上限。正在观察的会话会在服务端 tick 中更新。客户端请求距离小于配置最小值时仍可更小：配置允许最小 3 **不等于强制每个人至少加载 3**。
 
-半径 3 定义最多 7×7 区块的订阅窗口，实际仍受客户端请求及服务器视距限制。生物搜索 16 方块可越过相机中心区块边界，照常搜索邻区块，不截成中心 1 区块。支架生物扫描还可单独保活扫描区域；扫描对象必须实际存在于服务端。这个范围不是保证范围内每个生物都能选中，仍受镜头和遮挡判定。
+远景区块订阅先将玩家请求限制到服务器允许的范围，再取相机上限的较小值；客户端远景绘制取本机视频视距与服务端上限的较小值。性能调整还可进一步缩小原版地形绘制距离，实际订阅区域和当帧画出的地形不必完全相同。
+
+半径 3 定义最多 7×7 区块的订阅窗口，实际仍受客户端请求及服务器视距限制。生物搜索 16 或 32 方块可越过相机中心区块边界，照常搜索邻区块，不截成中心 1 区块。支架生物扫描还可单独保活扫描区域；扫描对象必须实际存在于服务端。这个范围不是保证范围内每个生物都能选中，仍受镜头和遮挡判定。
+
+`max_view_distance` 控制相机目标维度的**加载订阅和绘制上限**，不修改普通世界视频视距，也不设置原版模拟距离。目标区块的活跃程度由额外票据、服务端状态与 `serverSideNormalChunkLoading` 控制；当前不提供第二个“相机模拟距离”配置。
 
 照片使用玩家当前相机画面和已经同步的出镜实体，不为了照片把完整合影窗口加载齐；玩家传送不增加目的地区块等待。生物支架事务仍可等待获取目标实体必需的扫描区块，选中后只保活该实体所在区块直到上传完成或取消。
 
@@ -350,17 +419,14 @@ NeoForge 原生配置界面从模组列表进入，不依赖 Cloth Config。**�
 | 键 | 默认 | 生效端和含义 |
 | --- | --- | --- |
 | `enableClientPerformanceAdjustment` | `true` | 客户端原版地形渲染用近期帧率/可用内存，每 5 秒评估并缩短相机绘制距离；不超过服务端上限，不改普通世界视频设置。Sodium 自有地形流程不保证受此项控制。 |
-| `clientTolerantVersionMismatchWithServer` | `false` | 客户端在内核握手中表示允许主/次协议版本不同；不转换数据包，不绕过 NeoForge 必需通道格式检查，重新连接时生效。 |
-| `doCheckGlError` | `false` | 客户端额外检查 OpenGL 错误并记录日志；用于诊断，不修复 GPU 错误，增加检查开销。 |
+| `doCheckGlError` | `false` | 客户端额外检查 OpenGL 错误；诊断输出服从 `enableLogging`。用于诊断，不修复 GPU 错误，增加检查开销，关闭日志不会关闭此项已经启用的检查。 |
 | `saveMemoryInBufferPack` | `false` | 客户端减小新建原版区块网格缓冲的初始容量，容量不足仍增长。已有缓冲不会变小，Sodium 自有缓冲不由此控制；重启客户端使新分配一致。 |
-| `enableWarning` | `true` | 客户端游戏内内核提醒总开关；内存检测、诊断日志继续执行。缺少服务端协议的连接错误不是可屏蔽的普通提醒。 |
+| `enableWarning` | `true` | 统一开启或关闭全部内核游戏内提醒，包括 Iris、NVIDIA、分配内存偏低和运行中内存不足。与日志开关独立；关闭后不显示新提醒，业务检查及连接错误仍按原流程处理，已显示的聊天消息不会被清除。 |
+| `enableLogging` | `true` | 统一开启或关闭本模组主动写出的控制台和文件日志，包括诊断信息；开启时仍遵守标准日志级别，区块逐包记录和传送诊断使用 `DEBUG`，不自动提升到 `INFO`。关闭日志不改变游戏内提醒、业务检查、异常抛出或连接错误。 |
 | `serverSideNormalChunkLoading` | `true` | 服务端选择额外区块票据活跃级别：开为实体/方块 tick，关为方块 tick。关闭不取消订阅和票据，生物可能不更新；退出世界后修改，重新进入使新增/释放票据级别一致。 |
-| `chunkPacketDebug` | `false` | 客户端额外记录跨维度区块载入/卸载日志，视距高时日志量大；不改变同步算法。 |
 | `enableRemoteChunkLoading` | `true` | 服务端是否添加相机额外主动加载票据；关时依赖其他原因已加载的区块，可能缺地形或让实体扫描无法就绪；原版玩家加载保留。 |
-| `serverTolerantVersionMismatchWithClient` | `false` | 服务端放宽内核主/次协议版本检查，不转换消息，重新连接时生效。 |
-| `serverRejectClientWithoutShuttershadow` | `true` | 专用服务端额外拒绝没有 NeoForge/维度协议能力的客户端；关闭只跳过这一额外检查，必需 payload 通道仍保留，不提供原版客户端支持。 |
-| `serverTeleportLogging` | `false` | 服务端记录玩家无缝换维维度和坐标；只改变日志，不增加等待或改变传送结果。 |
-| `disabledWarnings` | `[]` | 客户端按 ID 屏蔽提醒；已有聊天消息不删除。ID：`iris`、`nvidia`、`low_max_memory`、`memory_not_enough`、`mod_version_mismatch`。 |
+
+本模组主动日志在配置加载前暂不输出，配置应用后按总开关当前值过滤，Log4j 重载后也继续生效。此开关不控制 Minecraft、NeoForge、Exposure、Sodium、Iris 等外部日志来源；其他来源代为报告的异常或连接错误仍沿用各自处理。需要查看逐包或传送诊断时，除开启总开关外，还需在标准日志配置中允许 `DEBUG` 级别。
 
 ### 本地路由回退格式
 
@@ -372,12 +438,12 @@ NeoForge 原生配置界面从模组列表进入，不依赖 Cloth Config。**�
     "shuttershadow:dimension_filter": {
       "targets": {
         "minecraft:the_nether": {
-          "routes": {
-            "minecraft:overworld": {
-              "target_dimension": "minecraft:the_nether",
+          "routes": [
+            {
+              "source_dimension": "minecraft:overworld",
               "coordinate_scale": 8.0
             }
-          }
+          ]
         }
       }
     }
@@ -385,7 +451,9 @@ NeoForge 原生配置界面从模组列表进入，不依赖 Cloth Config。**�
 }
 ```
 
-最外层按滤镜**物品 ID**，`targets` 按本模组滤镜组件目标，再按来源维度选择。route 值与数据包复用同一个 Codec；省略比例使用维度类型。不存在文件时生成三种原版维度的默认路由；读取失败使用默认回退。此 JSON 不是旧兼容文件，不与数据包高优先级路由合并为第二套注册表。
+最外层按滤镜**物品 ID**，`targets` 按滤镜组件目标，内部 `routes` 使用与数据包相同的非空来源数组和 Codec。来源条目省略比例默认为 `1`；不在数组中的来源无路由。本地文件不采用数据包的“省略整个子谓词允许所有来源”简写，每个目标仍需明确配置 `routes`。
+
+不存在文件时生成三种原版维度的默认路由：下界目标比例为 `8`，主世界、末地目标省略比例为 `1`，默认来源是另外两个原版维度。文件读取失败使用默认回退；可读文件中的无效目标配置会被忽略。它只作为解析兜底，不与已匹配的数据包路由合并，也不处理旧对象式路由。
 
 ## 8. 附魔、拍摄事件和胶卷边界
 
@@ -401,16 +469,43 @@ NeoForge 原生配置界面从模组列表进入，不依赖 Cloth Config。**�
 
 曝光失效继续触发 Exposure 的 `addNewFrame/onFrameAdded` 事件边界，但没有实际图片和新增胶卷帧。其他模组监听帧事件时不能假定一定能取到该曝光的图像。无胶卷、满卷等原生拍摄资格检查仍保留；曝光失效不消耗帧数。
 
-## 9. 网络协议和版本要求
+## 9. 客户端显示与可选渲染兼容
 
-NeoForge payload 注册版本是 **`12`**（`ShuttershadowNetwork.PROTOCOL_VERSION`），相机消息和内核消息共用该版本，消息 ID 使用 `shuttershadow:*`。连接阶段还有独立的内核运行时握手 **`1.0.0`**（`PlatformBridge.getCoreProtocolVersion()`）；这两个数字用途不同，不是模组文件版本。
+### 相机附件提示框
 
-两端应使用同一版本发行包。握手允许 patch 差异、默认拒绝 major/minor 差异；上述宽容配置只放宽此项内核检查，不能让不同 payload 格式兼容。NeoForge 注册消息通道不是 optional，关闭“拒绝缺少维度协议的客户端”也不代表纯原版或未安装本模组客户端可连接。
+`CameraAttachmentTooltip` 通过 NeoForge 的 `RenderTooltipEvent.GatherComponents` 与原生 `TooltipComponent`／`ClientTooltipComponent` 显示一行附件槽位。槽位顺序和数量来自 `CameraItem.getAttachments()`，普通相机依次显示胶卷、闪光灯、镜头、滤镜。空槽为无边框、无占位图案的深色形状；装入附件后绘制原物品图标及原生数量／耐久或胶卷进度装饰。
+
+组件只复制附件物品栈用于只读绘制，不打开新界面、不支持提示框拖放、不改变右键行为。右键仍进入 Exposure 相机原有附件界面。尊重物品的 `HIDE_TOOLTIP`、`HIDE_ADDITIONAL_TOOLTIP` 组件，且不会重复插入槽位组件。实现参考 Tide 的显示思路，不需要 Tide，也没有为此新增 Mixin。
+
+### 原版雾和光影边界
+
+相机远景渲染期间，`MixinGameRenderer` 将原版 `getRenderDistance()` 的返回值换成当前相机绘制半径乘 `16`，供天空／地形雾使用；`MixinFogRenderer` 让雾颜色混合也采用当前相机视距，并在维度切换时保存和恢复雾状态。普通世界的返回值不被该相机条件改写。
+
+这是**原版雾修复**。光影包可自行计算雾浓度、距离和边缘过渡，未必采用原版雾参数；相机范围较小而游戏视频视距较大时，光影下仍可能看见明显地形边缘。当前不修改 Iris 的 `far` uniform，也没有针对具体光影包再实现一套雾算法。
+
+### 可选模组契约
+
+| 模组 | 当前开发检查版本 | 接入边界 |
+| --- | --- | --- |
+| Sodium | 0.8.13，NeoForge 1.21.1 | 可选客户端兼容，切换其区块渲染上下文；发行包不内嵌、不要求安装。 |
+| Iris | 1.8.14 Beta 1，NeoForge 1.21.1 | 可选客户端兼容；手持和手动支架沿用玩家光影设置，保留手动远景截图的颜色／深度纹理附件恢复。光影包具体视觉效果需实测。 |
+| Create、Sable | Create 6.0.10、Sable 2.0.6，MC 1.21.1 | 加入本项目开发运行环境，不属于上述 Java API 或发行模组的必需依赖。 |
+| Immersive Portals | 不允许同时安装 | 跨维度内核已整合入本模组，metadata 明确声明与 `immersive_portals_core` 不兼容。 |
+
+可选兼容 Mixin 由 `CoreCompatMixinPlugin` 在对应模组存在时启用；未安装 Sodium／Iris 时使用原版路径。当前版本号是开发检查基准，不代表对任意后续版本或任意光影包作保证。`shader` 数据字段仍是 Exposure 照片后处理，与 Iris 光影包选择没有直接对应关系。
+
+## 10. 网络协议和版本要求
+
+NeoForge payload 注册版本是 **`13`**（`ShuttershadowNetwork.PROTOCOL_VERSION`），相机消息和内核消息共用该标识，消息 ID 使用 `shuttershadow:*`。客户端与服务端的通道必须存在且协议标识匹配，兼容性统一交由 NeoForge 的必需通道协商检查；不再另发内核 major/minor/patch 版本或容忍标记。
+
+两端应使用同一版本发行包。版本比较、差异提醒、协议容忍和额外拒绝开关已移除；缺少必需通道或协议标识不一致时由 NeoForge 阻止连接。本次删除配置包中的版本和容忍字段，协议从 `12` 升为 `13`，不兼容旧协议客户端。
+
+配置阶段只保留空的就绪确认：客户端收到后标记可读取扩展位置包并回复，服务端收到回复后完成该配置任务。它不携带版本、不比较兼容性，只保证首个位置包解码前已有明确状态；这时玩家对象可能还没有创建，不能依赖玩家对象查连接。登录维度类型同步继续保留，登出会清除就绪状态。
 
 原维度由 Minecraft 原生区块/实体发送；相机额外世界包由维度标记重定向，原版与相机区块批次使用独立回执。观察会话含递增序号及滤镜完整路由校验，迟到旧场景不会替换新滤镜目标；照片使用独立负序号。数据包滤镜注册表同步继续使用 Exposure 原生机制。
 
 协议、维度数字 ID 和客户端多世界切换是内核细节，外部扩展不应直接拼网络消息替代 API。需要增加消息字段、修改 StreamCodec 或两端世界语义时，同步更新两端和协议版本，并核查源码中的网络及 Mixin 调用链。
 
-## 10. 维护验证
+## 11. 维护验证
 
 修改 API 契约时同步更新本文和对应生产调用，并验证输入、权限、返回值及资源释放。GPU 光影、多人生物/载具和真实区块生成效果仍需游戏验证。

@@ -22,7 +22,6 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTracking;
 import com.xfw.shuttershadow.network.PacketRedirection;
-import com.xfw.shuttershadow.util.Helper;
 
 import java.util.List;
 import java.util.Set;
@@ -38,16 +37,13 @@ public class MixinPlayerList {
     @Final
     private MinecraftServer server;
     
-    /** placeNewPlayer 尾部立即刷新额外追踪并记录登录，保证登录状态/额外订阅一致。 */
+    /** placeNewPlayer 尾部立即刷新额外追踪，保证登录状态与额外订阅一致。 */
     @Inject(method = "placeNewPlayer", at = @At("TAIL"))
     private void onOnPlayerConnect(
         Connection connection, ServerPlayer player,
         CommonListenerCookie commonListenerCookie, CallbackInfo ci
     ) {
         RemoteChunkTracking.immediatelyUpdateForPlayer(player);
-        
-        // 用于调试。
-        Helper.LOGGER.info("Player login {} {}", player.level().getGameTime(), player);
     }
     
     /** 向正在异维度观察目标世界的玩家补发维度广播包。 */

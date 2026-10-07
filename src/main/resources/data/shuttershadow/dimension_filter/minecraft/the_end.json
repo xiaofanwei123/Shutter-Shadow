@@ -3,21 +3,9 @@
     "items": "shuttershadow:dimension_filter",
     "components": {
       "shuttershadow:dimension_filter_target": "minecraft:the_end"
-    },
-    "predicates": {
-      "shuttershadow:camera_dimension": {
-        "routes": {
-          "minecraft:overworld": {
-            "target_dimension": "minecraft:the_end",
-            "coordinate_scale": 1.0
-          },
-          "minecraft:the_nether": {
-            "target_dimension": "minecraft:the_end",
-            "coordinate_scale": 1.0
-          }
-        }
-      }
     }
   },
+  "attachment_texture": "exposure:textures/gui/filter/stained_glass.png",
+  "attachment_tint": "62529D",
   "shader": "shuttershadow:shaders/post/neutral.json"
 }

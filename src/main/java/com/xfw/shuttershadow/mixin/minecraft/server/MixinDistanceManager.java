@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTickets;
 import com.xfw.shuttershadow.access.IEChunkMap;
-import com.xfw.shuttershadow.core.CoreConfig;
+import com.xfw.shuttershadow.ShuttershadowConfig;
 
 /** 修复玩家移除时的空集合，并分批刷新相机加载票据。 */
 @Mixin(DistanceManager.class)
@@ -43,7 +43,7 @@ public abstract class MixinDistanceManager {
         at = @At("RETURN")
     )
     private void onRunAllUpdates(ChunkMap chunkManager, CallbackInfoReturnable<Boolean> cir) {
-        if (CoreConfig.ENABLE_REMOTE_CHUNK_LOADING.get()) {
+        if (ShuttershadowConfig.ENABLE_REMOTE_CHUNK_LOADING.get()) {
             ServerLevel world = ((IEChunkMap) chunkManager).ip_getWorld();
             RemoteChunkTickets tickets = RemoteChunkTickets.BY_DIMENSION.get(world);
             if (tickets != null) tickets.flushThrottling(world);
