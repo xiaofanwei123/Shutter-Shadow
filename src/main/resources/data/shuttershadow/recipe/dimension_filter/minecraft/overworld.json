@@ -1,20 +1,19 @@
 {
   "type": "minecraft:crafting_shaped",
   "pattern": [
-    "ONO",
+    "OOO",
     "OGO",
     "OOO"
   ],
   "key": {
     "G": { "item": "minecraft:glass_pane" },
-    "N": { "item": "minecraft:nether_star" },
-    "O": { "item": "minecraft:obsidian" }
+    "O": { "item": "minecraft:grass_block" }
   },
   "result": {
     "id": "shuttershadow:dimension_filter",
     "count": 1,
     "components": {
-      "shuttershadow:dimension_filter_target": "minecraft:the_nether"
+      "shuttershadow:dimension_filter_target": "minecraft:overworld"
     }
   }
 }

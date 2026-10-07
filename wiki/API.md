@@ -476,7 +476,7 @@ data/neoforge/loot_modifiers/global_loot_modifiers.json
 
 通过 NeoForge `RenderTooltipEvent.GatherComponents` 与原生 `TooltipComponent`/`ClientTooltipComponent` 显示附件槽位。顺序和数量来自 `CameraItem.getAttachments()`，普通相机依次为胶卷、闪光灯、镜头、滤镜。空槽只显示无边框、无占位图案的深色形状；已装附件显示原物品图标及原生数量、耐久或胶卷进度。
 
-这是只读物品提示框，不提供拖放或额外背包界面。尊重 `HIDE_TOOLTIP`/`HIDE_ADDITIONAL_TOOLTIP`，右键仍使用 Exposure 原界面。显示思路参考 Tide，不需要安装 Tide，没有为此新增 Mixin。
+这是只读物品提示框，不提供拖放或额外背包界面。尊重 `HIDE_TOOLTIP`/`HIDE_ADDITIONAL_TOOLTIP`，右键仍使用 Exposure 原界面。
 
 ### 原版雾和光影边界
 
