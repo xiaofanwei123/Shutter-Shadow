@@ -1,11 +1,11 @@
 package com.xfw.shuttershadow.network;
 
-import com.xfw.shuttershadow.DimensionFilmCapture;
-import com.xfw.shuttershadow.ExposureVisibility;
+import com.xfw.shuttershadow.camera.DimensionFilmCapture;
+import com.xfw.shuttershadow.camera.ExposureVisibility;
 import com.xfw.shuttershadow.api.DimensionFilters;
-import com.xfw.shuttershadow.CameraEnchantments;
-import com.xfw.shuttershadow.MobDimensionFilmCapture;
-import com.xfw.shuttershadow.RemoteCaptureContext;
+import com.xfw.shuttershadow.camera.CameraEnchantments;
+import com.xfw.shuttershadow.camera.MobDimensionFilmCapture;
+import com.xfw.shuttershadow.camera.RemoteCaptureContext;
 import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.ShuttershadowConfig;
 import com.xfw.shuttershadow.api.ChunkLoading;

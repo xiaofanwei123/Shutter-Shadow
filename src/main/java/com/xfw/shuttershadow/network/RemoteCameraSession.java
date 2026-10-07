@@ -3,7 +3,7 @@ package com.xfw.shuttershadow.network;
 import com.xfw.shuttershadow.api.DimensionFilters;
 import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.ShuttershadowConfig;
-import com.xfw.shuttershadow.RemoteCaptureContext;
+import com.xfw.shuttershadow.camera.RemoteCaptureContext;
 import io.github.mortuusars.exposure.world.entity.CameraStandEntity;
 import io.github.mortuusars.exposure.world.item.camera.Attachment;
 import io.github.mortuusars.exposure.world.item.camera.CameraItem;

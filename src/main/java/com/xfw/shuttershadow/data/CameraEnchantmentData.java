@@ -1,7 +1,7 @@
 package com.xfw.shuttershadow.data;
 
 import com.google.gson.JsonParser;
-import com.xfw.shuttershadow.CameraEnchantments;
+import com.xfw.shuttershadow.camera.CameraEnchantments;
 import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.loot.EndShipChestCondition;
 import net.minecraft.core.HolderLookup;

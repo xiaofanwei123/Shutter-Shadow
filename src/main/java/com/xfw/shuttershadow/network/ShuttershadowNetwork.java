@@ -1,6 +1,6 @@
 package com.xfw.shuttershadow.network;
 
-import com.xfw.shuttershadow.DimensionFilmCapture;
+import com.xfw.shuttershadow.camera.DimensionFilmCapture;
 import com.xfw.shuttershadow.Shuttershadow;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;

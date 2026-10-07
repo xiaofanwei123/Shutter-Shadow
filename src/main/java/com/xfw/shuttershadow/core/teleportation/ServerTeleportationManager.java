@@ -1,7 +1,7 @@
 package com.xfw.shuttershadow.core.teleportation;
 
 import com.xfw.shuttershadow.Shuttershadow;
-import com.xfw.shuttershadow.DimensionFilmCapture;
+import com.xfw.shuttershadow.camera.DimensionFilmCapture;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;

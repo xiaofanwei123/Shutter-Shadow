@@ -1,6 +1,6 @@
 package com.xfw.shuttershadow.mixin.exposure;
 
-import com.xfw.shuttershadow.CameraEnchantments;
+import com.xfw.shuttershadow.camera.CameraEnchantments;
 import io.github.mortuusars.exposure.client.camera.CameraClient;
 import io.github.mortuusars.exposure.client.camera.viewfinder.Viewfinder;
 import io.github.mortuusars.exposure.client.camera.viewfinder.ViewfinderSelfie;

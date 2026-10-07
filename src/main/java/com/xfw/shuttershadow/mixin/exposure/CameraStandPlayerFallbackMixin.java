@@ -1,7 +1,7 @@
 package com.xfw.shuttershadow.mixin.exposure;
 
 import com.xfw.shuttershadow.api.DimensionFilters;
-import com.xfw.shuttershadow.ExposureVisibility;
+import com.xfw.shuttershadow.camera.ExposureVisibility;
 import com.xfw.shuttershadow.ShuttershadowConfig;
 import io.github.mortuusars.exposure.world.entity.CameraStandEntity;
 import io.github.mortuusars.exposure.world.item.camera.Attachment;

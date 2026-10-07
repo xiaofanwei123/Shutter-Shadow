@@ -4,15 +4,15 @@ import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.sugar.Local;
-import com.xfw.shuttershadow.DimensionFilmCapture;
-import com.xfw.shuttershadow.CameraEnchantments;
-import com.xfw.shuttershadow.MobDimensionFilmCapture;
+import com.xfw.shuttershadow.camera.DimensionFilmCapture;
+import com.xfw.shuttershadow.camera.CameraEnchantments;
+import com.xfw.shuttershadow.camera.MobDimensionFilmCapture;
 import com.xfw.shuttershadow.network.RemoteCameraSession;
 import com.xfw.shuttershadow.network.CameraSessionCloseC2S;
 import com.xfw.shuttershadow.network.RemoteSceneStartS2C;
 import com.xfw.shuttershadow.network.RemoteStandPreparation;
-import com.xfw.shuttershadow.RemoteCaptureContext;
-import com.xfw.shuttershadow.ExposureVisibility;
+import com.xfw.shuttershadow.camera.RemoteCaptureContext;
+import com.xfw.shuttershadow.camera.ExposureVisibility;
 import com.xfw.shuttershadow.ShuttershadowConfig;
 import com.xfw.shuttershadow.util.CaptureEntitySearchRange;
 import io.github.mortuusars.exposure.util.ExtraData;
@@ -59,7 +59,7 @@ import java.util.Optional;
 
 /** 将 Exposure 相机接入维度拍摄、胶卷传送和附魔流程。 */
 @Mixin(value = CameraItem.class, remap = false)
-public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttershadow.DimensionFilmCapture.TakePhotoInvoker {
+public abstract class CameraItemRemoteCaptureMixin implements DimensionFilmCapture.TakePhotoInvoker {
 
     /** 自恋狂相机打开时进入正面自拍并归零自拍旋转。 */
     @Inject(method = "activateInHand", at = @At("HEAD"))
@@ -84,7 +84,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
                                              ItemStack camera, CallbackInfo callback) {
         if ((getProjection(camera).isEmpty()
                 && RemoteStandPreparation.beginIfNeeded((CameraItem) (Object) this, holder, player, camera))
-                || com.xfw.shuttershadow.DimensionFilmCapture.beginIfNeeded(
+                || DimensionFilmCapture.beginIfNeeded(
                 (CameraItem) (Object) this, holder, player, camera)) {
             callback.cancel();
         }
@@ -96,7 +96,7 @@ public abstract class CameraItemRemoteCaptureMixin implements com.xfw.shuttersha
                                                         ItemStack camera, CallbackInfo callback) {
         if (!RemoteStandPreparation.shouldDeferTeleport(holder)) {
             try {
-                com.xfw.shuttershadow.DimensionFilmCapture.teleportStandPlayersAfterPhoto(holder, camera);
+                DimensionFilmCapture.teleportStandPlayersAfterPhoto(holder, camera);
             } finally {
                 RemoteStandPreparation.finishOrdinaryCapture(holder);
             }

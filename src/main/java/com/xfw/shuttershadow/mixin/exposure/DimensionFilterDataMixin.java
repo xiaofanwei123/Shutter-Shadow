@@ -3,7 +3,7 @@ package com.xfw.shuttershadow.mixin.exposure;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
-import com.xfw.shuttershadow.DimensionFilterResources;
+import com.xfw.shuttershadow.data.DimensionFilterResources;
 import io.github.mortuusars.exposure.Exposure;
 import net.minecraft.core.WritableRegistry;
 import net.minecraft.resources.FileToIdConverter;
