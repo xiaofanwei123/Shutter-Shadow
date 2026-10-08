@@ -12,14 +12,19 @@ import java.util.Arrays;
 /** 相机业务payload注册及客户端隔离调用。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class ShuttershadowNetwork {
-    public static final String PROTOCOL_VERSION = "14";
+    public static final String PROTOCOL_VERSION = "16";
     /** 禁止实例化此工具类。 */
     private ShuttershadowNetwork() {}
 
-    /** 注册四个C2S与三个S2C相机业务包。 */
+    /** 注册相机观察、传送确认和图片结果的双向业务包。 */
     @SubscribeEvent
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         var registrar = event.registrar(PROTOCOL_VERSION);
+        registrar.playToServer(CameraCaptureFailedC2S.TYPE, CameraCaptureFailedC2S.STREAM_CODEC,
+                (payload, context) -> context.enqueueWork(() -> {
+                    if (context.player() instanceof ServerPlayer player)
+                        com.xfw.shuttershadow.camera.CameraCaptureEvents.imageFailed(player, payload.exposureId());
+                }));
         registrar.playToServer(CameraSessionRequestC2S.TYPE, CameraSessionRequestC2S.STREAM_CODEC,
                 (payload, context) -> context.enqueueWork(() -> {
                     if (context.player() instanceof ServerPlayer player) {
@@ -29,8 +34,15 @@ public final class ShuttershadowNetwork {
         registrar.playToServer(CameraSessionCloseC2S.TYPE, CameraSessionCloseC2S.STREAM_CODEC,
                 (payload, context) -> context.enqueueWork(() -> {
                     if (context.player() instanceof ServerPlayer player) {
-                        RemoteStandPreparation.onCaptureFinished(player, payload.sequence(), payload.captured());
-                        RemoteCameraSession.close(player, payload.sequence());
+                        try {
+                            RemoteStandPreparation.onCaptureFinished(player, payload.sequence(), payload.captured());
+                        } finally {
+                            try {
+                                com.xfw.shuttershadow.camera.CameraCaptureEvents.captureFinished(player, payload.sequence(), payload.captured());
+                            } finally {
+                                RemoteCameraSession.close(player, payload.sequence());
+                            }
+                        }
                     }
                 }));
         registrar.playToServer(DimensionFilmReadyC2S.TYPE, DimensionFilmReadyC2S.STREAM_CODEC,

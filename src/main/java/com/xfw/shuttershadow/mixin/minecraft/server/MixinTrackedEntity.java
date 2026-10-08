@@ -132,14 +132,11 @@ public abstract class MixinTrackedEntity implements IETrackedEntity {
         }
     }
 
-    /** 解除保留玩家之外的全部实体配对，并清空追踪集合。 */
+    /** 解除全部实体配对，并清空追踪集合。 */
     @Override
-    public void ip_stopTrackingExcept(ServerPlayer preservedPlayer) {
+    public void ip_stopTracking() {
         for (ServerPlayerConnection connection : seenBy) {
-            ServerPlayer player = connection.getPlayer();
-            if (player != preservedPlayer) {
-                serverEntity.removePairing(player);
-            }
+            serverEntity.removePairing(connection.getPlayer());
         }
         seenBy.clear();
         shuttershadow$additionalWatchers.clear();

@@ -1,12 +1,15 @@
 package com.xfw.shuttershadow.network;
 
 import com.xfw.shuttershadow.api.DimensionFilters;
+import com.xfw.shuttershadow.api.event.CameraViewEvent;
 import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.ShuttershadowConfig;
 import com.xfw.shuttershadow.camera.RemoteCaptureContext;
 import io.github.mortuusars.exposure.world.entity.CameraStandEntity;
+import io.github.mortuusars.exposure.world.entity.CameraOperator;
 import io.github.mortuusars.exposure.world.item.camera.Attachment;
 import io.github.mortuusars.exposure.world.item.camera.CameraItem;
+import io.github.mortuusars.exposure.world.item.camera.CameraSettings;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -23,6 +26,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.common.NeoForge;
 import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.api.ChunkLoading;
 import com.xfw.shuttershadow.api.ChunkLoader;
@@ -69,15 +73,16 @@ public final class RemoteCameraSession {
     private final ServerPlayer owner;
     private final long sequence;
     private final ResourceKey<Level> sourceDimension;
-    private final ServerLevel remoteLevel;
-    private final double coordinateScale;
+    private ServerLevel remoteLevel;
+    private double coordinateScale;
     private final int cameraStandId;
     private final Vec3 sourceOrigin;
-    private final Vec3 targetOrigin;
+    private Vec3 targetOrigin;
     private final DimensionFilters.Route mapping;
     private ChunkLoader loader;
     private ChunkLoader sourceLoader;
     private int advertisedMaxRenderDistance = -1;
+    private CameraViewEvent.Context viewContext;
 
     /** 保存摄影师、会话序号、路由、来源世界、目标世界、坐标映射与支架ID，loader在刷新时建立。 */
     private RemoteCameraSession(ServerPlayer player, CameraSessionRequestC2S request,
@@ -109,19 +114,37 @@ public final class RemoteCameraSession {
         if (current != null && current.owner == player && current.sequence == request.sequence()
                 && current.cameraStandId == request.cameraStandId()
                 && current.sourceDimension.equals(player.level().dimension())
-                && current.remoteLevel == target && current.matchesRoute(mapping)
+                && current.matchesRoute(mapping)
                 && player.getServer().getPlayerList().getPlayer(player.getUUID()) == player) {
             current.sendScene(serverMaxRenderDistance(player));
             return;
         }
 
-        if (current != null) close(current.owner);
+        if (current != null) close(current.owner, CameraViewEvent.CloseReason.CAMERA_CHANGED);
         double scale = DimensionFilters.horizontalScale(player.serverLevel(), target);
         Vec3 sourceOrigin = cameraAnchorPosition(player, request.cameraStandId());
         if (sourceOrigin == null) return;
         Vec3 converted = DimensionFilters.mapAbsolute(sourceOrigin, scale);
+        ItemStack camera = activeCamera(player, request.cameraStandId());
+        CameraViewEvent.Open opened = new CameraViewEvent.Open(new CameraViewEvent.Context(
+                request.sequence(), CameraViewEvent.Side.SERVER, player, camera, request.cameraStandId(),
+                player.level().dimension().location(), sourceOrigin, targetId, converted,
+                request.cameraStandId() < 0 ? mode(camera) : CameraViewEvent.Mode.NORMAL));
+        NeoForge.EVENT_BUS.post(opened);
+        CameraViewEvent.Context selected = opened.getContext();
+        target = player.getServer().getLevel(ResourceKey.create(Registries.DIMENSION,
+                selected.targetDimension()));
+        if (target == null || target == player.serverLevel()) {
+            NeoForge.EVENT_BUS.post(new CameraViewEvent.Close(selected, CameraViewEvent.CloseReason.INVALIDATED));
+            PacketDistributor.sendToPlayer(player, new RemoteSceneStopS2C());
+            return;
+        }
+        scale = DimensionFilters.horizontalScale(player.serverLevel(), target);
+        converted = selected.targetPosition() == null
+                ? DimensionFilters.mapAbsolute(sourceOrigin, scale) : selected.targetPosition();
         RemoteCameraSession created = new RemoteCameraSession(
                 player, request, target, scale, converted, sourceOrigin, mapping);
+        created.viewContext = created.viewContext();
         ACTIVE.put(player.getUUID(), created);
         // 首次建立与后续刷新共用入口：先注册 IP 订阅，再通知客户端场景与视距上限。
         created.refreshRemoteWindow();
@@ -136,7 +159,8 @@ public final class RemoteCameraSession {
         int maxRenderDistance = serverMaxRenderDistance(owner);
         // 玩家请求、服务器视距及相机专用上限共同限制真实远维度订阅。
         int effectiveRenderDistance = Math.min(McHelper.getPlayerLoadDistance(owner), maxRenderDistance);
-        if (loader == null || loader.x() != chunkX || loader.z() != chunkZ
+        if (loader == null || !loader.dimension().equals(remoteLevel.dimension())
+                || loader.x() != chunkX || loader.z() != chunkZ
                 || loader.radius() != effectiveRenderDistance) {
             ChunkLoader replacement = new ChunkLoader(remoteLevel.dimension(), chunkX, chunkZ,
                     effectiveRenderDistance);
@@ -165,7 +189,7 @@ public final class RemoteCameraSession {
     private void sendScene(int maxRenderDistance) {
         PacketDistributor.sendToPlayer(owner, new RemoteSceneStartS2C(
                 sequence, remoteLevel.dimension().location(), targetOrigin,
-                sourceOrigin, coordinateScale, maxRenderDistance, sourceDimension.location()));
+                sourceOrigin, coordinateScale, maxRenderDistance, sourceDimension.location(), mapping.dimension()));
         advertisedMaxRenderDistance = maxRenderDistance;
     }
 
@@ -288,10 +312,16 @@ public final class RemoteCameraSession {
 
     /** 只删除属于同一ServerPlayer实例的活动会话并释放loader。 */
     public static void close(ServerPlayer player) {
+        close(player, CameraViewEvent.CloseReason.NORMAL);
+    }
+
+    /** 先释放远场，再发布一次不会阻止清理的结束事件。 */
+    public static void close(ServerPlayer player, CameraViewEvent.CloseReason reason) {
         RemoteCameraSession current = ACTIVE.get(player.getUUID());
         if (current != null && current.owner == player) {
             ACTIVE.remove(player.getUUID());
             current.releaseLoader();
+            NeoForge.EVENT_BUS.post(new CameraViewEvent.Close(current.viewContext, reason));
         }
     }
 
@@ -346,18 +376,83 @@ public final class RemoteCameraSession {
                 && owner.getServer().getLevel(remoteLevel.dimension()) == remoteLevel;
     }
 
+    /** 从实际活动相机取得物品，不采用客户端提交的物品快照。 */
+    private static ItemStack activeCamera(ServerPlayer player, int standId) {
+        if (standId >= 0 && player.level().getEntity(standId) instanceof CameraStandEntity stand) {
+            return stand.getCamera();
+        }
+        var camera = ((CameraOperator) player).getActiveExposureCamera();
+        return camera == null ? ItemStack.EMPTY : camera.getItemStack();
+    }
+
+    /** 支架保持普通模式，手持从已同步的 Exposure 设置读取自拍状态。 */
+    private static CameraViewEvent.Mode mode(ItemStack camera) {
+        return CameraSettings.SELFIE_MODE.getOrDefault(camera)
+                ? CameraViewEvent.Mode.SELFIE : CameraViewEvent.Mode.NORMAL;
+    }
+
+    /** 生成本刻真实来源和服务端授权目标位置的快照。 */
+    private CameraViewEvent.Context viewContext() {
+        ItemStack camera = activeCamera(owner, cameraStandId);
+        Vec3 source = cameraAnchorPosition(owner, cameraStandId);
+        return new CameraViewEvent.Context(sequence, CameraViewEvent.Side.SERVER, owner, camera,
+                cameraStandId, sourceDimension.location(), source == null ? sourceOrigin : source,
+                remoteLevel.dimension().location(), targetCameraPosition(owner),
+                cameraStandId < 0 ? mode(camera) : CameraViewEvent.Mode.NORMAL);
+    }
+
+    /** 应用服务端 Tick 修改，原滤镜仍独立验证，重复相同目标不会重新发包。 */
+    private boolean updateScene(CameraViewEvent.Context selected) {
+        ResourceLocation dimension = selected.targetDimension();
+        Vec3 requested = selected.targetPosition();
+        if (remoteLevel.dimension().location().equals(dimension)
+                && requested != null && requested.equals(targetCameraPosition(owner))) return true;
+        ServerLevel target = owner.getServer().getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
+        if (target == null || target.dimension().equals(sourceDimension)) return false;
+        Vec3 source = cameraAnchorPosition(owner, cameraStandId);
+        if (source == null) return false;
+        double scale = DimensionFilters.horizontalScale(owner.serverLevel(), target);
+        Vec3 position = requested == null ? DimensionFilters.mapAbsolute(source, scale) : requested;
+        if (remoteLevel == target && position.equals(targetCameraPosition(owner))) return true;
+        coordinateScale = scale;
+        Vec3 delta = source.subtract(sourceOrigin);
+        targetOrigin = cameraStandId >= 0 ? position
+                : position.subtract(new Vec3(delta.x * coordinateScale, delta.y, delta.z * coordinateScale));
+        remoteLevel = target;
+        advertisedMaxRenderDistance = -1;
+        return true;
+    }
+
     /** 清理无人拥有且超期的照片loader。 */
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
         CAPTURES.entrySet().removeIf(entry -> !RemoteStandPreparation.ownsCapture(entry.getKey())
                 && entry.getValue().releaseIfExpired(CAPTURE_TIMEOUT_TICKS));
-        for (var iterator = ACTIVE.entrySet().iterator(); iterator.hasNext();) {
-            RemoteCameraSession session = iterator.next().getValue();
+        for (RemoteCameraSession session : List.copyOf(ACTIVE.values())) {
+            if (ACTIVE.get(session.owner.getUUID()) != session) continue;
             if (!session.isValid()) {
-                iterator.remove();
-                session.releaseLoader();
+                CameraViewEvent.CloseReason reason = !session.owner.isAlive()
+                        ? CameraViewEvent.CloseReason.DEATH
+                        : !session.owner.level().dimension().equals(session.sourceDimension)
+                        ? CameraViewEvent.CloseReason.DIMENSION_CHANGED : CameraViewEvent.CloseReason.INVALIDATED;
+                close(session.owner, reason);
             } else {
-                session.refreshRemoteWindow();
+                session.viewContext = session.viewContext();
+                CameraViewEvent.Tick tick = new CameraViewEvent.Tick(session.viewContext);
+                NeoForge.EVENT_BUS.post(tick);
+                if (ACTIVE.get(session.owner.getUUID()) != session) continue;
+                CameraViewEvent.Context selected = tick.getContext();
+                if (tick.isCloseRequested() || !session.updateScene(selected)) {
+                    try {
+                        close(session.owner, CameraViewEvent.CloseReason.EVENT_REQUESTED);
+                    } finally {
+                        PacketDistributor.sendToPlayer(session.owner,
+                                new RemoteSceneStopS2C(session.sequence, tick.isCloseRequested()));
+                    }
+                } else {
+                    session.refreshRemoteWindow();
+                    session.viewContext = selected.targetPosition() == null ? session.viewContext() : selected;
+                }
             }
         }
     }
@@ -366,21 +461,52 @@ public final class RemoteCameraSession {
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            close(player);
-            CAPTURES.values().removeIf(capture -> {
-                if (capture.owner() != player) return false;
-                capture.release();
-                return true;
-            });
+            Throwable failure = null;
+            try {
+                close(player, CameraViewEvent.CloseReason.DISCONNECTED);
+            } catch (RuntimeException | Error exception) {
+                failure = exception;
+            }
+            var captures = CAPTURES.values().iterator();
+            while (captures.hasNext()) {
+                CaptureLoader capture = captures.next();
+                if (capture.owner() != player) continue;
+                captures.remove();
+                try {
+                    capture.release();
+                } catch (RuntimeException | Error exception) {
+                    if (failure == null) failure = exception;
+                    else if (failure != exception) failure.addSuppressed(exception);
+                }
+            }
+            if (failure instanceof RuntimeException exception) throw exception;
+            if (failure instanceof Error error) throw error;
         }
     }
 
     /** 服务端停止时释放所有loader并清空静态集合。 */
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
-        CAPTURES.values().forEach(CaptureLoader::release);
+        Throwable failure = null;
+        var captures = List.copyOf(CAPTURES.values());
         CAPTURES.clear();
-        for (RemoteCameraSession session : ACTIVE.values()) session.releaseLoader();
-        ACTIVE.clear();
+        for (CaptureLoader capture : captures) {
+            try {
+                capture.release();
+            } catch (RuntimeException | Error exception) {
+                if (failure == null) failure = exception;
+                else if (failure != exception) failure.addSuppressed(exception);
+            }
+        }
+        for (RemoteCameraSession session : List.copyOf(ACTIVE.values())) {
+            try {
+                close(session.owner, CameraViewEvent.CloseReason.SERVER_STOPPING);
+            } catch (RuntimeException | Error exception) {
+                if (failure == null) failure = exception;
+                else if (failure != exception) failure.addSuppressed(exception);
+            }
+        }
+        if (failure instanceof RuntimeException exception) throw exception;
+        if (failure instanceof Error error) throw error;
     }
 }

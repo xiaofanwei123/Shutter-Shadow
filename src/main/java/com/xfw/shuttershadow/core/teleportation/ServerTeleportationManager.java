@@ -17,14 +17,12 @@ import com.xfw.shuttershadow.util.McHelper;
 import com.xfw.shuttershadow.core.chunk_loading.RemoteChunkTracking;
 import com.xfw.shuttershadow.network.PacketRedirection;
 import com.xfw.shuttershadow.access.IEEntity;
-import com.xfw.shuttershadow.access.IEChunkMap;
-import com.xfw.shuttershadow.access.IETrackedEntity;
 import com.xfw.shuttershadow.access.IEServerPlayerEntity;
 
 import java.util.HashSet;
 import java.util.Set;
 
-/** 执行各服务器的玩家、普通实体及骑乘载具传送。 */
+/** 执行玩家和普通实体的单主体传送，原载具与其他乘客留在来源世界。 */
 public class ServerTeleportationManager {
     private final Set<Entity> teleportingEntities = new HashSet<>();
 
@@ -42,23 +40,23 @@ public class ServerTeleportationManager {
     }
 
     /** 默认发送位置包的玩家传送重载。 */
-    public void forceTeleportPlayer(
+    public boolean forceTeleportPlayer(
         ServerPlayer player, ResourceKey<Level> dimensionTo, Vec3 newPos
     ) {
-        forceTeleportPlayer(
+        return forceTeleportPlayer(
             player, dimensionTo, newPos, true
         );
     }
 
     /** 校验目标与胶卷保护状态，执行玩家传送并按需发送位置包。 */
-    public void forceTeleportPlayer(
+    public boolean forceTeleportPlayer(
         ServerPlayer player, ResourceKey<Level> dimensionTo, Vec3 newPos,
         boolean sendPacket
     ) {
         // 胶卷主动传送可通过；保护期内其他传送请求继续拦截。
         if (DimensionFilmCapture.shouldBlockPortalTeleport(player)
             && !DimensionFilmCapture.isExplicitTransferInProgress(player)) {
-            return;
+            return false;
         }
 
 
@@ -70,14 +68,18 @@ public class ServerTeleportationManager {
                 "Cannot teleport player {} to non-existing dimension {}",
                 player, dimensionTo.location()
             );
-            return;
+            return false;
         }
-        
-        if (player.level().dimension() == dimensionTo) {
+
+        if (fromWorld != toWorld && toWorld.entityManager.isLoaded(player.getUUID())) return false;
+        if (!detach(player)) return false;
+
+        if (fromWorld == toWorld) {
             player.setPos(newPos.x, newPos.y, newPos.z);
         }
         else {
-            changePlayerDimension(player, fromWorld, toWorld, newPos.add(McHelper.getEyeOffset(player)));
+            if (!changePlayerDimension(player, fromWorld, toWorld,
+                    newPos.add(McHelper.getEyeOffset(player)))) return false;
         }
         
         if (sendPacket) {
@@ -95,61 +97,80 @@ public class ServerTeleportationManager {
         
 
         RemoteChunkTracking.immediatelyUpdateForPlayer(player);
+        return true;
     }
 
-    /** 标记传送状态，完成玩家跨维度切换与载具恢复。 */
-    private void changePlayerDimension(
+    /** 复用玩家实例完成跨维度切换，并触发原版换维进度。 */
+    private boolean changePlayerDimension(
         ServerPlayer player,
         ServerLevel fromWorld,
         ServerLevel toWorld,
         Vec3 newEyePos
     ) {
-        // 从旧世界移除玩家时，保留无缝切换所需的实体跟踪状态。
-        // 对应处理位于区块映射实体跟踪混入中。
-        teleportingEntities.add(player);
-        
-        Entity vehicle = player.getVehicle();
-        if (vehicle != null) {
-            ((IEServerPlayerEntity) player).ip_stopRidingWithoutTeleportRequest();
-        }
-        
         Vec3 oldPos = player.position();
-        
-        // 释放旧原版区块视野与待发送队列，此阶段数据包明确标注旧维度。
-        PacketRedirection.withForceRedirect(fromWorld,
-                () -> fromWorld.removePlayerImmediately(player, Entity.RemovalReason.CHANGED_DIMENSION));
-        ((IEEntity) player).ip_unsetRemoved();
-        
-        McHelper.setEyePos(player, newEyePos, newEyePos);
-        McHelper.updateBoundingBox(player);
-        
-        player.setServerLevel(toWorld);
-        
-        // 原版注册会立即发送区块中心及实体包，此时客户端尚未收到跨维度位置包。
-        PacketRedirection.withForceRedirect(toWorld, () -> toWorld.addDuringTeleport(player));
-        
-        if (vehicle != null) {
-            Vec3 offset = player.getVehicleAttachmentPoint(vehicle);
-            Vec3 vehiclePos = player.position().add(offset);
-            vehicle = teleportVehicleAcrossDimensions(
-                vehicle,
-                toWorld,
-                vehiclePos.add(McHelper.getEyeOffset(vehicle)),
-                player
-            );
-            McHelper.setPosAndLastTickPos(
-                vehicle,
-                player.position().add(offset),
-                McHelper.lastTickPosOf(player).add(offset)
-            );
-            ((IEServerPlayerEntity) player).ip_startRidingWithoutTeleportRequest(vehicle);
-            McHelper.adjustVehicle(player);
+        float oldYaw = player.getYRot();
+        float oldPitch = player.getXRot();
+        float oldHeadYaw = player.getYHeadRot();
+        teleportingEntities.add(player);
+        try {
+            // 位置包发送前，各阶段实体与区块消息仍绑定其实际世界。
+            PacketRedirection.withForceRedirect(fromWorld,
+                    () -> fromWorld.removePlayerImmediately(player, Entity.RemovalReason.CHANGED_DIMENSION));
+            ((IEEntity) player).ip_unsetRemoved();
+            McHelper.setEyePos(player, newEyePos, newEyePos);
+            McHelper.updateBoundingBox(player);
+            player.setServerLevel(toWorld);
+            PacketRedirection.withForceRedirect(toWorld, () -> toWorld.addDuringTeleport(player));
+            if (toWorld.getEntity(player.getUUID()) != player) {
+                restorePlayer(player, fromWorld, oldPos, oldYaw, oldPitch, oldHeadYaw);
+                return false;
+            }
+        } catch (RuntimeException failure) {
+            try {
+                restorePlayer(player, fromWorld, oldPos, oldYaw, oldPitch, oldHeadYaw);
+            } catch (RuntimeException rollbackFailure) {
+                failure.addSuppressed(rollbackFailure);
+            }
+            throw failure;
         }
-        
-        
-        
-        // 更新跨维度相关进度。
         ((IEServerPlayerEntity) player).portal_worldChanged(fromWorld, oldPos);
+        return true;
+    }
+
+    /** 目标登记失败后恢复来源玩家，不允许回滚再次被加入世界事件取消。 */
+    private void restorePlayer(ServerPlayer player, ServerLevel fromWorld, Vec3 oldPos,
+                               float yaw, float pitch, float headYaw) {
+        ServerLevel currentWorld = player.serverLevel();
+        if (currentWorld != fromWorld && currentWorld.getEntity(player.getUUID()) == player) {
+            PacketRedirection.withForceRedirect(currentWorld,
+                    () -> currentWorld.removePlayerImmediately(player, Entity.RemovalReason.CHANGED_DIMENSION));
+        }
+        ((IEEntity) player).ip_unsetRemoved();
+        player.setServerLevel(fromWorld);
+        McHelper.setEyePos(player, oldPos.add(McHelper.getEyeOffset(player)),
+                oldPos.add(McHelper.getEyeOffset(player)));
+        player.setYRot(yaw);
+        player.setXRot(pitch);
+        player.setYHeadRot(headYaw);
+        McHelper.updateBoundingBox(player);
+        if (fromWorld.getEntity(player.getUUID()) != player) {
+            PacketRedirection.withForceRedirect(fromWorld, () -> {
+                Validate.isTrue(fromWorld.entityManager.addNewEntityWithoutEvent(player),
+                        "Cannot restore player to source world");
+                player.onAddedToLevel();
+            });
+        }
+        teleportingEntities.remove(player);
+        player.connection.resetPosition();
+        RemoteChunkTracking.immediatelyUpdateForPlayer(player);
+    }
+
+    /** 只解除所选主体的关系，任何被取消的下车都会拒绝移动。 */
+    private static boolean detach(Entity entity) {
+        entity.stopRiding();
+        if (entity.isPassenger()) return false;
+        entity.ejectPassengers();
+        return !entity.isVehicle();
     }
 
     /** 判断实体是否正在本游戏刻内传送。 */
@@ -165,7 +186,7 @@ public class ServerTeleportationManager {
     ) {
         if (entity.getRemovalReason() != null) {
             Shuttershadow.LOGGER.error("Trying to teleport a removed entity {}", entity, new Throwable());
-            return entity;
+            return null;
         }
         
         MinecraftServer server = entity.getServer();
@@ -178,15 +199,15 @@ public class ServerTeleportationManager {
                 "Invalid dest dimension {} to teleport entity {} to",
                 toDimension.location(), entity
             );
-            return entity;
+            return null;
         }
 
-        entity.unRide();
-        
+        if (toWorld.entityManager.isLoaded(entity.getUUID())) return null;
+
         Entity oldEntity = entity;
         Entity newEntity = entity.getType().create(toWorld);
         if (newEntity == null) {
-            return oldEntity;
+            return null;
         }
 
         newEntity.restoreFrom(oldEntity);
@@ -195,59 +216,20 @@ public class ServerTeleportationManager {
         McHelper.updateBoundingBox(newEntity);
         newEntity.setYHeadRot(oldEntity.getYHeadRot());
 
+        if (!detach(oldEntity)) return null;
+        if (!toWorld.addFreshEntity(newEntity)) return null;
         // TODO check minecart item duplication
         oldEntity.remove(Entity.RemovalReason.CHANGED_DIMENSION);
 
-        toWorld.addDuringTeleport(newEntity);
-
-        return newEntity;
-    }
-
-    /** 在目标世界重建玩家的直接载具，并同步观察者状态。 */
-    private Entity teleportVehicleAcrossDimensions(
-        Entity entity,
-        ServerLevel toWorld,
-        Vec3 newEyePos,
-        ServerPlayer rider
-    ) {
-        // 仅乘客保留客户端载具用于无缝切换；其余观察者必须清除原维度旧载具。
-        teleportingEntities.add(entity);
-        
-        ServerLevel fromWorld = (ServerLevel) entity.level();
-        
-        Entity oldEntity = entity;
-        Entity newEntity;
-        newEntity = entity.getType().create(toWorld);
-        Validate.isTrue(newEntity != null);
-        
-        newEntity.restoreFrom(oldEntity);
-        newEntity.setId(oldEntity.getId());
-        McHelper.setEyePos(newEntity, newEyePos, newEyePos);
-        McHelper.updateBoundingBox(newEntity);
-        newEntity.setYHeadRot(oldEntity.getYHeadRot());
-
-        var tracker = ((IEChunkMap) fromWorld.getChunkSource().chunkMap)
-                .ip_getEntityTrackerMap().get(oldEntity.getId());
-        if (tracker != null) {
-            ((IETrackedEntity) tracker).ip_stopTrackingExcept(rider);
-        }
-        
-        oldEntity.remove(Entity.RemovalReason.CHANGED_DIMENSION);
-        ((IEEntity) oldEntity).ip_unsetRemoved();
-        
-        // 载具在跨维度位置包之前登记，和乘客一样必须先路由至目标世界。
-        PacketRedirection.withForceRedirect(toWorld, () -> toWorld.addDuringTeleport(newEntity));
-        
         return newEntity;
     }
 
     /** 玩家走forceTeleportPlayer，其余走teleportRegularEntityTo。 */
     public static Entity teleportEntityGeneral(Entity entity, Vec3 targetPos, ServerLevel targetWorld) {
         if (entity instanceof ServerPlayer serverPlayer) {
-            of(serverPlayer.server).forceTeleportPlayer(
+            return of(serverPlayer.server).forceTeleportPlayer(
                 serverPlayer, targetWorld.dimension(), targetPos
-            );
-            return entity;
+            ) ? entity : null;
         }
         else {
             return teleportRegularEntityTo(entity, targetWorld.dimension(), targetPos);
@@ -260,6 +242,7 @@ public class ServerTeleportationManager {
         E entity, ResourceKey<Level> targetDim, Vec3 targetPos
     ) {
         if (entity.level().dimension() == targetDim) {
+            if (!detach(entity)) return null;
             entity.moveTo(
                 targetPos.x,
                 targetPos.y,

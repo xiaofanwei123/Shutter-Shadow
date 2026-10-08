@@ -9,12 +9,12 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
-/** 公开无缝传送API，返回确认移动成功的实体或null。 */
+/** 公开单主体无缝传送API，原载具和其他乘客留在来源世界。 */
 public final class SeamlessTeleportation {
     /** 禁止实例化此工具类。 */
     private SeamlessTeleportation() {}
 
-    /** 拒绝null参数、错线程/服务器、已移除/死亡实体、过期目标世界、非有限坐标或胶卷保护期非法调用。 */
+    /** 校验请求，只在解除骑乘及目标世界登记均成功后返回实际移动主体。 */
     public static @Nullable Entity teleportEntity(Entity entity, ServerLevel targetLevel, Vec3 targetPosition) {
         if (entity == null || targetLevel == null || targetPosition == null) return null;
         MinecraftServer server = targetLevel.getServer();

@@ -8,6 +8,6 @@ public interface IETrackedEntity {
     void ip_updateEntityTrackingStatus();
     /** 玩家真实维度变化时修正其在此tracker中的原版/额外观察关系。 */
     void ip_onPlayerDimensionChange(ServerPlayer player);
-    /** 除保留玩家以外停止所有观察关系，用于随骑乘玩家移动的载具。 */
-    void ip_stopTrackingExcept(ServerPlayer preservedPlayer);
+    /** 玩家实体离开旧世界时解除全部观察关系。 */
+    void ip_stopTracking();
 }

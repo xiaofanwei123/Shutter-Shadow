@@ -1,5 +1,6 @@
 package com.xfw.shuttershadow.mixin.exposure;
 
+import com.xfw.shuttershadow.camera.CameraCaptureEvents;
 import com.xfw.shuttershadow.network.RemoteStandPreparation;
 import io.github.mortuusars.exposure.util.UnixTimestamp;
 import io.github.mortuusars.exposure.world.level.storage.ExpectedExposure;
@@ -8,6 +9,9 @@ import net.minecraft.server.level.ServerPlayer;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Map;
 import java.util.Set;
@@ -17,6 +21,13 @@ import java.util.Set;
 public abstract class ExposureRepositoryRemoteMixin implements RemoteStandPreparation.UploadWindow {
     @Shadow @Final
     protected Map<ServerPlayer, Set<ExpectedExposure>> expectedExposures;
+
+    /** 原生上传通过校验并运行完成回调后，通知本模组拍摄事务收图完成。 */
+    @Inject(method = "onExposureReceived", at = @At("TAIL"))
+    private void shuttershadow$imageReceived(ServerPlayer player, String exposureId,
+                                             CallbackInfo callback) {
+        CameraCaptureEvents.uploaded(player, exposureId);
+    }
 
     /** 刷新指定照片的上传等待期限，并保留原完成回调。 */
     @Override

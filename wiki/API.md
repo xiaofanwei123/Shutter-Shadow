@@ -12,6 +12,9 @@
 | `ChunkLoader` | 描述额外加载的正方形区块区域 | 构造不加载；就绪检查只读取 |
 | `ChunkLoading` | 注册和释放服务端保活或玩家额外区块订阅 | 是 |
 | `DimensionFilters` | 创建滤镜、读取目标组件、按维度类型换算坐标 | 创建修改新物品栈；解析和换算不传送、不加载区块 |
+| `CameraCaptureContext` | 一次拍摄的固定身份、执行者和来源快照 | 读取快照；持有者及玩家仍是真实对象 |
+| `CameraCapturePlan` | 拍摄前调整照片、玩家传送和生物传送计划 | 本身不执行动作；受理后冻结并由内部流程执行 |
+| `api.event` 中的六类事件 | 控制观察、拍摄、对象选择、帧数据、图片和主体传送 | 按各事件契约调整当前流程或接收通知 |
 | `CameraDimensionTeleportEvent` | 通知相机拍摄已成功让玩家换维 | 事件本身只通知；监听者可执行后续行为 |
 
 接入项目需要把 Shuttershadow JAR 放入编译依赖；实际运行还需要 Shuttershadow 及 Exposure。无缝玩家跨维和向玩家同步异维度区块要求**客户端与服务端都安装**本模组及必要依赖。Sodium、Iris 仍是可选客户端模组，不是这些 API 的前置。
@@ -47,7 +50,7 @@ public static @Nullable ServerPlayer teleportPlayer(
 
 该入口沿用强制传送行为，**不触发 NeoForge 可取消的维度旅行事件**。它不自动选择安全落点、不避开方块、不检查世界边界、不弹出同意界面，也不拍照。玩家维度胶卷自己的名单、保护和客户端清理由相机业务层负责；外部 API 不公开绕过保护的作用域。
 
-玩家正在乘坐的**直接载具**，例如船或矿车，会随玩家跨维并恢复乘坐。其他乘客留在原维度；不会递归搬运整棵乘客树。其他原维度观察者会清除旧载具，当前传送玩家保留客户端载具用于无缝交接。普通实体跨维传送会解除骑乘关系，同维传送不主动解除；它们没有玩家的自动携带规则。不要把已跨维重建的旧实体引用继续用于后续操作。
+现在采用**单主体传送**：只移动参数指定的玩家或实体，不携带船、矿车或其他乘客。同维和跨维都先让主体下车，并让主体的乘客下车；载具与其他乘客留在来源世界。若其他模组取消下车，使任一骑乘关系没有解除，则返回 `null`，不继续移动。来源和目标已经是同一位置也会执行这项关系清理。不要把跨维重建后已移除的旧实体引用继续用于后续操作。
 
 ### 可直接使用的示例
 
@@ -96,7 +99,7 @@ if (moved != null) {
 
 权限等级 **2**。实体参数支持选择器，维度由原版 `DimensionArgument` 解析，坐标由原版 `Vec3Argument` 解析，支持 `~` 和 `^`。坐标以**命令源**解析，不以每个目标实体分别解析，不进行维度倍率转换；整数 X/Z 的默认居中规则也沿用原版参数。命令在移动任何实体前使用原版可生成坐标边界检查。
 
-每个目标都调用 `SeamlessTeleportation.teleportEntity`。指令返回实际成功数，部分失败时同时报告成功与拒绝数量，仍服从相机保护。批量选择玩家与其载具时，命令会查找先前由玩家携带到目标世界的载具新实例，避免操作已被替换的旧副本。`tps` 是传送指令，不是服务器每秒 tick 数查询。
+每个目标都独立调用 `SeamlessTeleportation.teleportEntity`，先解除骑乘，仅移动选择器选中的主体，不携带原载具或其他乘客，也不恢复乘坐关系。指令返回实际成功数，部分失败时同时报告成功与拒绝数量，仍服从相机保护。`tps` 是传送指令，不是服务器每秒 tick 数查询。
 
 ## 3. 区块区域：ChunkLoader
 
@@ -374,7 +377,241 @@ Exposure 外层物品谓词仍控制滤镜是否可用及附件显示；Shutters
 
 总开关不控制 Minecraft、NeoForge、Exposure、Sodium、Iris 等外部来源的日志，不改变异常抛出、连接错误或游戏内提醒。服务端管理员可开启服务端本地日志，客户端仍保留自己的设置。
 
-## 8. 相机换维事件、附魔与拍摄边界
+## 8. 相机事件、玩法控制与附魔
+
+### 注册方式与职责边界
+
+六类新事件在 `com.xfw.shuttershadow.api.event`，全部使用 **NeoForge 游戏事件总线** `NeoForge.EVENT_BUS`，不是模组注册总线。监听具体事件，例如 `CameraCaptureEvent.Before`，不要把抽象父事件当作统一监听入口。
+
+事件开放可控制的阶段；内部协调器、自拍事务、支架事务和生物上传事务仍负责调用顺序、网络确认及资源释放。默认玩法不是全部改成事件监听。现有附魔和来源元数据会使用部分新事件，其他扩展也可以在同一边界调整计划。
+
+| 事件类及具体类型 | 发布端与线程 | 可控制内容 |
+| --- | --- | --- |
+| `CameraViewEvent.Open`、`Tick`、`Close` | 客户端主线程；服务端远场会话在服务器线程另行发布 | 打开/观察时客户端改模式、服务端改观察场景；Tick 可请求关闭；Close 只通知 |
+| `CameraCaptureEvent.Before`、`Completed` | 服务器线程 | Before 可取消整次拍摄、修改计划；Completed 报告终态 |
+| `CameraSubjectsEvent` | 服务器线程 | 分别筛选照片主体、玩家传送主体、生物传送主体 |
+| `CameraFrameEvent` | 服务器线程 | 生成整帧后修改元数据或替换同一图片编号的帧 |
+| `CameraImageEvent.Ready` | 客户端主线程 | 在 Exposure 颜色处理前读取或替换图片 |
+| `CameraTransferEvent.Before`、`After` | 服务器线程 | Before 可取消单个主体或改目标与朝向；After 报告该主体结果 |
+
+只有 `CameraCaptureEvent.Before` 与 `CameraTransferEvent.Before` 实现 `ICancellableEvent`，可用 `setCanceled(true)`。观察关闭用 `CameraViewEvent.Tick.requestClose()`；帧和图片不提供取消接口。需要取消成片而保留传送，应在拍摄 Before 设置 `NO_IMAGE`，不要取消整次拍摄。
+
+`@EventBusSubscriber(modid = "example")` 默认注册到游戏事件总线。使用自己的 mod ID；涉及 `CameraImageEvent` 或 Minecraft 客户端类的监听器须单独限制为 `value = Dist.CLIENT`。观察事件即便写在客户端专属监听类，单人游戏仍可能收到集成服务端发布的事件，所以还要检查 `getContext().side()`。
+
+### CameraCaptureContext：固定拍摄身份
+
+上下文由真实拍摄入口建立，异步恢复不重新建立身份、不重复发布拍摄 Before。扩展应读取事件提供的上下文，不自行构造上下文并发布事件来启动拍摄。
+
+| 方法 | 当前契约 |
+| --- | --- |
+| `getShotId()` | 本次逻辑拍摄的 UUID；同一次延迟截图、上传和传送共享该编号 |
+| `getTrigger()` | `HANDHELD`、`MANUAL_STAND`、`REDSTONE` |
+| `getHolder()` | 真实来源 `CameraHolder`；支架返回支架持有者，不是代拍玩家 |
+| `getExecutor()` | 首次受理时负责截图、上传的固定 `ServerPlayer` 实例；红石时不代表实际按按钮的人 |
+| `getCamera()` | 首次受理时的相机快照，每次读取返回独立副本，修改不会写回实际相机 |
+| `getSourceLevel()`、`getSourcePosition()` | 拍摄开始时的来源世界及持有者脚底位置，不随自拍换维变化 |
+| `isSelfie()` | 开始时是否为手持自拍；支架为 `false` |
+| `getObservationDimension()` | 开始时可解析的观察目标；无远场时为 `null`，不是最终照片世界或玩家目的地 |
+
+`getHolder()` 和 `getExecutor()` 保留真实对象引用，实体可能在后续阶段移动、死亡或换维。需要原始位置时使用来源快照，不重新从真实实体读取。同一支架被其他玩家接手后，已受理拍摄的上传及生物事务仍属于原执行者。重新登录或复活后的同 UUID 新玩家对象不能冒领旧回执。
+
+观察 `sessionId`、服务端拍摄 `shotId` 和 Exposure `exposureId` 是三个不同身份。`CameraFrameEvent` 的 Frame 带图片编号；客户端图片事件通过 `getExposureId()`、`getCameraId()`、来源维度和持有者 ID 识别截图，不直接提供服务端 `CameraCaptureContext`。
+
+### CameraCapturePlan：只在拍摄 Before 修改
+
+`CameraCaptureEvent.Before.getPlan()` 返回共享计划，监听者按总线优先级依次修改。事件派发结束后计划冻结；之后调用 setter 会抛 `IllegalStateException`。缺失的照片世界，或已启用传送所需的查询/目标世界不存在，会终结为 `FAILED`。保存计划引用不等于可以在上传时再改目的地。
+
+| setter | 控制内容与边界 |
+| --- | --- |
+| `setPhotoOutput(PhotoOutput output)` | `PHOTO` 正常成片；`NO_IMAGE` 不写卷、不生成图片、不要求上传，但继续拍摄逻辑和已启用传送 |
+| `setPhotoScene(ResourceLocation dimension, @Nullable Vec3 position)` | 指定照片世界及镜头脚底坐标；空坐标沿用观察锚点或原生维度换算。不修改玩家目的地 |
+| `setFilterShader(@Nullable ResourceLocation shader)` | 指定 Exposure 照片后处理资源；`null` 明确取消该照片滤镜，不关闭 Iris 光影 |
+| `setPlayerTransfer(boolean enabled)` | 启用/停用玩家传送；手持仍须自拍，支架仍筛选有效出镜玩家 |
+| `setPlayerDestination(ResourceLocation dimension, @Nullable Vec3 position)` | 玩家目标世界及固定脚底坐标；空坐标为各玩家沿当前锚点/原生比例映射 |
+| `setMobTransfer(boolean enabled)` | 启用/停用生物传送；不把照片名单当作生物名单 |
+| `setMobQueryDimension(ResourceLocation dimension)` | 查询生物的世界，独立于照片世界 |
+| `setMobCaptureRadius(int radius)` | 本次生物查询范围，1～32 方块；不修改服务器配置 |
+| `setMobDestination(ResourceLocation dimension, @Nullable Vec3 position)` | 生物目标世界及固定脚底坐标；空坐标回来源镜头映射，另指定世界时按原生比例换算 |
+
+计划通过 `getPhotoOutput()`、`getPhotoDimension()`、`getPhotoPosition()`、`isPhotoSceneChanged()`、`isShaderChanged()`、`getFilterShader()`、`isPlayerTransfer()`、`getPlayerDimension()`、`getPlayerPosition()`、`isMobTransfer()`、`getMobQueryDimension()`、`getMobCaptureRadius()`、`getMobDimension()`、`getMobPosition()` 与 `isFrozen()` 读取当前状态。`freeze()` 由协调器调用；监听者不要提前冻结其他监听者仍需修改的计划。
+
+所有 setter 要求相应非空字段有效；坐标 setter 拒绝 NaN/无穷，查询半径超范围抛 `IllegalArgumentException`。开启传送不会自动补齐目标：没有滤镜路由的普通拍摄若要新增玩家传送，须同时设置玩家目的地；新增生物传送须设置查询世界和目标世界。原生无胶卷、满卷等拍摄资格检查仍保留，计划不提供绕过它们的入口。
+
+曝光失效监听以 `HIGHEST` 优先级把输出设为 `NO_IMAGE`，后续较低优先级监听可明确改回 `PHOTO`。自恋狂也通过客户端 Open 的 `HIGHEST` 监听给出默认自拍，后续监听可改回 `NORMAL`。同优先级不应依赖注册顺序。
+
+### CameraViewEvent：打开、观察与关闭
+
+客户端在真实取景器建立时发布一次 Open，正常有效游戏刻发布 Tick，退出时发布 Close；暂停游戏不继续发布有效观察 Tick。它覆盖普通相机、维度手持相机和手动支架。服务端只针对通过校验的远场观察会话发布相应事件，不为普通相机或红石后台截图虚构一次交互观察。
+
+`getContext()` 返回 `CameraViewEvent.Context`。record 的读取器是 `sessionId()`、`side()`、`player()`、`camera()`、`cameraStandId()`、`sourceDimension()`、`sourcePosition()`、`targetDimension()`、`targetPosition()`、`mode()`，另有 `supportsSelfie()`。相机栈是隔离副本，真实玩家引用不复制。手持 `cameraStandId() < 0`，支架使用真实实体 ID；普通观察或客户端尚未收到场景确认时目标可以为空。两端会话编号独立，不能把客户端编号直接当成服务端编号使用。
+
+| 方法 | 权限与行为 |
+| --- | --- |
+| `Open/Tick.trySetMode(Mode mode)` | 只允许 `Side.CLIENT`；`NORMAL` 为远景、`SELFIE` 为自拍，支架拒绝自拍。成功返回 `true`，跨端/不支持返回 `false` |
+| `Open/Tick.trySetScene(ResourceLocation dimension, @Nullable Vec3 position)` | 只允许 `Side.SERVER`；空位置按来源锚点与原生比例换算，明确位置必须有限且 X/Z 不超过 ±30,000,000。返回 `true` 不代表目标世界已经通过后续校验或加载完成 |
+| `Tick.requestClose()`、`isCloseRequested()` | 请求走正常清理流程关闭当前观察；不是取消拍摄，不能当作红石拍摄开关 |
+| `Close.getReason()` | `NORMAL`、`CAMERA_CHANGED`、`DIMENSION_CHANGED`、`DEATH`、`DISCONNECTED`、`INVALIDATED`、`SERVER_STOPPING`、`EVENT_REQUESTED` |
+
+监听者修改后再次调用 `getContext()` 可读取目前共享的模式/场景。服务端会验证目标世界存在且不是当前来源世界，再更新实际订阅和发包；不会让客户端 `trySetScene` 获得权威。修改观察场景会影响后续拍摄默认观察锚点，但不等于当前拍摄 Before 的照片或传送计划已经改变。
+
+Close 不可取消。服务端单会话先移除索引、释放订阅，再通知监听者；客户端退出也保证原生取景器清理继续执行。登出和停服时，即便某个 Close 监听抛异常，也会尽量清理其他会话及后台截图请求，收集异常后继续抛出；不是静默吞掉错误。监听器应自行处理其可恢复异常，不把复杂阻塞任务放在 Tick 中。
+
+### CameraSubjectsEvent：三个独立名单
+
+通过 `getContext()`、`getPurpose()`、`getCandidates()`、`getSubjects()` 读取当前阶段。候选和返回名单不可修改，使用 setter 提交新名单。
+
+| `Purpose` | 默认选择与修改方式 |
+| --- | --- |
+| `PHOTO` | 当前照片查询到的实体；手动远景支架还可能有来源玩家的投影。红石维度支架默认源照片移除玩家。使用 `getPhotoSubjects()` / `setPhotoSubjects(...)` |
+| `PLAYER_TRANSFER` | 手持自拍为本人；支架为源维度经投影和镜头筛选的玩家。使用 `getTransferSubjects()` / `setTransferSubjects(...)` |
+| `MOB_TRANSFER` | 查询世界中符合范围与镜头条件的非玩家生物，默认首个；可选多个。使用 `getTransferSubjects()` / `setTransferSubjects(...)` |
+
+调用错误阶段的 setter 会抛 `IllegalStateException`。setter 去重且只保留已有候选，协调器还会再次去掉死亡或移除实体。支架玩家传送仍检查在线实例、来源世界、个人同意和传送保护。选空名单可只取消该类主体；不能通过名单添加范围外实体或绕过个人同意。
+
+照片主体控制实体元数据及原生照片相关行为，**不删除截图中的像素**。默认红石源照片不显示玩家的视觉效果由截图场景负责，不能仅靠移除照片元数据名单来隐藏图像中的玩家。照片和传送候选若能复用查询仍分别发布事件，筛选一个阶段不会覆盖另一个。
+
+### CameraFrameEvent：服务端整帧数据
+
+在 Frame 数据生成完毕、实际写入胶卷之前发布，`NO_IMAGE` 也发布。`getContext()` 返回拍摄身份，`getFrame()` 返回当前不可变 Frame，`getExtraData()` 返回本事件可修改的帧级 `ExtraData`。`replaceFrame(Frame replacement)` 可替换整帧，但图片编号必须与原 Frame 相同，否则抛 `IllegalArgumentException`；不要改编号来绑定另一次上传。
+
+实体级元数据可从 `getFrame()` 建立 `Frame.Mutable`，调整实体条目后调用 `replaceFrame(mutable.toImmutable())`。本事件不保证图像已经生成、胶卷已经写入或玩家尚未换维：手持自拍的换维在本阶段之前。
+
+### CameraImageEvent.Ready：客户端图像及所有权
+
+原始照片图片成功生成后、进入 Exposure 的颜色/调色板处理与上传之前，在客户端主线程发布一次 Ready。`NO_IMAGE`、截图失败或未真正生成图片的拍摄没有 Ready。事件不代表服务端已接收图片。
+
+`getExposureId()` 是图片编号，`getCameraId()` 是可能为空的相机稳定 ID，`getSourceDimension()` 和 `getCameraHolderId()` 是创建截图任务时的真实来源身份。远景截图的来源仍为源相机/支架，不能用当前客户端世界推断作者。`getCaptureParameters()` 每次返回参数副本，额外数据也复制；修改它不会改变当前任务。
+
+`getImage()` 返回**借用**的 `Image`，只能在同步监听期间读取或生成独立替换图片。不要关闭、异步持有或在监听结束后继续读原图。`replaceImage(Image replacement)` 接管新图并立即关闭被替换旧图；传入当前同一对象不重复关闭，已替换关闭的图不能再传回。最终图像交给 Exposure 的后续任务管理，监听者不要再释放它。派发异常时当前图像也会清理，异常沿原任务链传播。
+
+### CameraTransferEvent：每个主体的实际移动
+
+相机玩家/生物传送入口分别为每个显式选中的主体发布 Before 与 After；同一张照片选中多个主体会有多对事件。直接无缝 API 与 `/tps` 不发布它。取消 Before 只阻止当前主体，不取消照片、其他主体或之前已经成功的传送。
+
+共同读取方法为 `getContext()`、`getCamera()`、`getEntity()`、`getEntityId()`、`getSourceLevel()`、`getSourcePosition()`、`getTargetLevel()`、`getTargetPosition()`、`getYaw()` 和 `getPitch()`。相机是副本，来源在移动前固定，`getEntityId()` 保留 UUID。`getEntity()` 是原主体，普通实体跨维后可能已移除；所属拍摄上下文在未建立事务的内部入口中可能为 `null`，扩展须检查。
+
+Before 另有 `setTargetLevel(ServerLevel)`、`setTargetPosition(Vec3)`、`setYaw(float)`、`setPitch(float)`。实际执行前检查服务器/世界身份、实体存活、有限坐标与朝向；取消或参数拒绝不会先退出正在操作的支架相机。移动仍服从无缝 API 的保护与单主体规则。
+
+After 通过 `getResult()` 返回 `SUCCESS`、`CANCELED`、`REJECTED` 或 `FAILED`，`isSuccessful()` 简化成功判断。`getMovedEntity()` 只在 API 确认成功时返回实际目标实体；普通实体必须用此新引用。`getFailure()` 为执行时的运行时异常，取消或参数拒绝通常为空。After 不可取消，失败也不保证回滚已经发生的世界变更。
+
+### CameraCaptureEvent.Completed：整次拍摄终态
+
+本事件只发布一次，发布前移除本次索引并释放它拥有的失败/取消资源，迟到回执不能完成旧拍摄两次。它在 `nativeReturned` 与支架动作结束后才可能完成；`PHOTO` 还要求服务端接收该执行者的对应图片。快门声、Frame 生成与 Completed 是不同阶段，不应相互代替。
+
+| `getResult()` | 含义 |
+| --- | --- |
+| `IMAGE_RECEIVED` | 本次图片已被服务端接收，原生拍摄与支架等待已结束；不保证世界数据已保存到磁盘 |
+| `NO_IMAGE` | 免成片流程已结束，没有图片和新增胶卷帧 |
+| `CANCELED` | 拍摄 Before 取消，不继续本次成片或传送 |
+| `FAILED` | 计划无效、截图/图片处理失败、执行者失效、超时或执行异常等 |
+
+`hasImage()`、`wasFilmWritten()`、`getTransferredEntities()` 与 `getFailureReason()` 分别报告是否收图、是否实际写卷、已确认成功传送主体的不可变 UUID 列表以及取消/失败说明。成功说明为空字符串。`FAILED` 不等于没有写卷或没有传送，尤其手持自拍可能已经移动后才发生图片失败；应分别读取这些字段。
+
+### 五种默认玩法与可控边界
+
+| 默认玩法 | 默认照片与主体时序 | 扩展可以修改什么 |
+| --- | --- | --- |
+| 手持/手动支架 + 维度滤镜，普通胶卷拍目标世界 | 当前可见目标画面；不等完整视距 | Before 改照片世界、位置、滤镜或免成片；PHOTO 改照片元数据主体；Frame/Image 分别改数据和像素 |
+| 手持/手动支架 + 玩家维度胶卷 | 手持自拍先传本人，客户端确认换维后再拍；手持远景不主动传本人。手动支架先截图完成，再传有效出镜玩家 | Before 开关与目的地；PLAYER_TRANSFER 筛候选；Transfer.Before 控制单个主体 |
+| 手持/手动支架 + 生物维度胶卷 | 查询目标世界，默认首个非玩家；成片上传成功后传回来源，免成片不等上传 | Before 改查询/目标世界、范围、坐标；MOB_TRANSFER 可选多个候选；Transfer.Before 独立取消或重定向 |
+| 红石支架 + 玩家维度胶卷 | 默认拍原维度并隐藏玩家，不渲染目标照片；截图完成后传源镜头筛选的玩家 | Before 可免成片、停传送或明确改照片场景；PLAYER_TRANSFER 与 Transfer 控制传送 |
+| 红石支架 + 生物维度胶卷 | 默认拍原维度，目标生物扫描独立进行；上传成功后传生物，免成片直接走传送 | Before 独立设置照片、查询和生物目的地；MOB_TRANSFER 与 Transfer 控制候选和实际移动 |
+
+这五种行为以现有附件和默认计划为起点；扩展可让两个传送开关同时启用，或替普通照片增加目标，但仍受对应入口能力和候选资格约束。无缝传送保留，船/矿车不随玩家传送。红石默认不建立真实观察 Open/Tick；没有维度路由的普通红石相机沿原照片流程，不套用维度支架的隐藏玩家规则。
+
+服务端一般从 Before 进入对象查询、Frame、原生拍摄和支架结束，再进入 Completed；玩家自拍的 Transfer 在 Frame 前，支架玩家的 Transfer 在截图确认后，生物的 Transfer 在上传验收后。`NO_IMAGE` 不创建客户端图片阶段，但保留对象、Frame、传送及原生拍摄后的统计/进度行为。不要假定所有玩法有同一条固定事件顺序，尤其不能把客户端 Ready 当成服务器传送完成通知。
+
+### 可直接注册的服务端监听示例
+
+以下示例让红石拍摄免成片、把生物名单限制为候选中的动物、追加来源元数据，并在整次完成时通知执行者；它不更改默认玩家传送开关。只需把 `example` 改为接入模组 ID，各方法也可独立采用。
+
+```java
+import com.xfw.shuttershadow.api.CameraCaptureContext;
+import com.xfw.shuttershadow.api.CameraCapturePlan;
+import com.xfw.shuttershadow.api.event.CameraCaptureEvent;
+import com.xfw.shuttershadow.api.event.CameraFrameEvent;
+import com.xfw.shuttershadow.api.event.CameraSubjectsEvent;
+import io.github.mortuusars.exposure.util.ExtraData;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.animal.Animal;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+
+@EventBusSubscriber(modid = "example")
+public final class CameraGameplayListener {
+    private static final ExtraData.Type<ResourceLocation> SOURCE =
+            ExtraData.Type.resourceLocation("example_capture_source");
+
+    @SubscribeEvent
+    public static void before(CameraCaptureEvent.Before event) {
+        if (event.getContext().getTrigger() == CameraCaptureContext.Trigger.REDSTONE) {
+            event.getPlan().setPhotoOutput(CameraCapturePlan.PhotoOutput.NO_IMAGE);
+        }
+    }
+
+    @SubscribeEvent
+    public static void subjects(CameraSubjectsEvent event) {
+        if (event.getPurpose() == CameraSubjectsEvent.Purpose.MOB_TRANSFER) {
+            event.setTransferSubjects(event.getCandidates().stream()
+                    .filter(entity -> entity instanceof Animal).toList());
+        }
+    }
+
+    @SubscribeEvent
+    public static void frame(CameraFrameEvent event) {
+        event.getExtraData().put(SOURCE,
+                event.getContext().getSourceLevel().dimension().location());
+    }
+
+    @SubscribeEvent
+    public static void completed(CameraCaptureEvent.Completed event) {
+        event.getContext().getExecutor().sendSystemMessage(Component.literal(
+                "拍摄结果：" + event.getResult()
+                + "，成功传送：" + event.getTransferredEntities().size()));
+    }
+}
+```
+
+想把普通手持自拍设为特定目的地，在 Before 中先调用 `setPlayerDestination(ResourceLocation.parse("minecraft:the_end"), new Vec3(0.5, 80, 0.5))`，再调用 `setPlayerTransfer(true)`。仅设置目的地不自动启用传送，手持也仍须处于自拍。全局取消用 `event.setCanceled(true)`，仅取消某人用 `CameraTransferEvent.Before.setCanceled(true)`。
+
+### 可直接注册的客户端监听示例
+
+示例在打开手持相机时设为自拍，并在图片颜色处理前记录尺寸。它只读取借用图像，不提前释放 Exposure 后续还会使用的资源。
+
+```java
+import com.xfw.shuttershadow.api.event.CameraImageEvent;
+import com.xfw.shuttershadow.api.event.CameraViewEvent;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+
+@EventBusSubscriber(modid = "example", value = Dist.CLIENT)
+public final class CameraClientListener {
+    @SubscribeEvent
+    public static void opened(CameraViewEvent.Open event) {
+        if (event.getContext().side() == CameraViewEvent.Side.CLIENT
+                && event.getContext().supportsSelfie()) {
+            event.trySetMode(CameraViewEvent.Mode.SELFIE);
+        }
+    }
+
+    @SubscribeEvent
+    public static void ready(CameraImageEvent.Ready event) {
+        var player = Minecraft.getInstance().player;
+        if (player != null) {
+            player.displayClientMessage(Component.literal("照片 " + event.getExposureId()
+                    + "：" + event.getImage().width() + "×" + event.getImage().height()), false);
+        }
+    }
+}
+```
+
+服务端 Open/Tick 的场景覆盖使用 `event.trySetScene(targetDimension, null)`；目标须已注册、与来源不同，且仍需有效的原滤镜观察会话。要关闭观察，在所需端的 Tick 调 `requestClose()`。自定义图片处理可实现独立的 Exposure `Image`，复制或生成自己的像素后交给 `replaceImage(...)`；原接口只有尺寸、像素读取和关闭契约，不存在通用 `Image.copy()` 或写像素 API。
+
+当前源码还带有 `camera.CameraEventTest` 聊天测试监听器，`ENABLED = true`；仅用于核对实际事件顺序，观察 Tick 消息限频到每 20 个玩家刻，事件本身没有被限频。这些聊天测试消息不受 `enableLogging` 或 `core.enableWarning` 控制。它是当前开发测试辅助，不是公共 API 或配置开关。
 
 ### CameraDimensionTeleportEvent
 
@@ -403,7 +640,7 @@ public final class CameraDimensionTeleportEvent extends PlayerEvent {
 
 普通拍照、同维传送、拒绝或失败传送不发布；生物胶卷、`/tps` 和直接调用 `SeamlessTeleportation` 也不自动发布。手持自拍先传送再继续拍摄，因此本事件**不表示照片上传或胶卷写入完成**。
 
-事件没有 Exposure 的 `Frame`、照片 ID、`CameraHolder`、出镜列表或拍摄参数，也不区分红石与手动触发。照片信息继续使用 Exposure 自己的帧事件和额外数据接口。外部接入只需监听，不应自行构造并发布它来模拟拍照。
+该事件不提供 Frame、图片 ID、出镜列表或触发类型；要控制拍摄及读取照片信息，使用上面的 `CameraCaptureEvent`、`CameraSubjectsEvent` 和 `CameraFrameEvent`。它继续用于安全传送附魔等“玩家已经换维”的后续效果，不被 `CameraTransferEvent.After` 取代。外部接入只需监听，不应自行构造并发布它来模拟拍照。
 
 监听示例，使用你自己模组的 mod ID：
 
@@ -429,7 +666,7 @@ public final class CameraTeleportListener {
 
 | 注册 ID / 显示名称 | 等级 | 效果与来源 |
 | --- | --- | --- |
-| `shuttershadow:exposure_failure` / 曝光失效-相机 | I | 不写胶卷帧、不创建图片、不截图或上传，仍保留快门、Exposure 事件、统计/进度及维度胶卷传送。下界要塞宝箱获得。 |
+| `shuttershadow:exposure_failure` / 曝光失效-相机 | I | 默认计划为 `NO_IMAGE`：不写胶卷帧、不创建图片、不截图或上传，仍保留本模组拍摄事件、快门、原生统计/进度及维度胶卷传送。下界要塞宝箱获得。 |
 | `shuttershadow:narcissism` / 自恋狂-相机 | I | 每次打开手持相机默认正面自拍，仍可切回远景；退出恢复原视角。支架无自拍，不改变支架。下界要塞宝箱获得。 |
 | `shuttershadow:safe_dimension_teleport` / 安全传送维度-相机 | I～III | 相机成功传送玩家换维后，分别给予 10/20/30 秒缓降及安全传送效果。末地船宝箱获得。 |
 
@@ -458,17 +695,17 @@ data/neoforge/loot_modifiers/global_loot_modifiers.json
 
 它不改变目标落点，不熄火，不把玩家从虚空救回；效果结束后伤害恢复。同维传送、普通拍照及通用传送 API 不自动给予保护。可以通过原版 `/effect` 显式给予新效果；注册效果不代表增加了独立药水瓶或酿造配方。
 
-### Exposure 原事件与胶卷
+### Exposure 原事件替换与胶卷
 
-曝光失效继续执行 Exposure 的 `addNewFrame/onFrameAdded` 事件路径，但没有实际图片和新增胶卷帧。其他模组监听 Exposure 帧事件时不能假定一定存在图像。无胶卷、满卷等原生拍摄资格检查保留；曝光失效不消耗帧数，手持、手动支架、红石支架都生效。
+加载本模组后，当前 Exposure 相机拍摄路径中的 `ModifyEntityInFrameDataEvent`、`ModifyFrameExtraDataEvent` 和 `FrameAddedEvent` **不再派发**，统一使用本模组的新事件，不保留旧事件桥接。这个替换覆盖普通相机和维度相机，不只对装滤镜的相机生效；依赖这些原事件的拓展需要适配。它没有关闭 NeoForge 的其他事件，也没有删除 Exposure 的原始帧数据生成、统计、进度和实体拍摄行为。
 
-曝光失效通过拍照局部注入跳过写卷、图片和上传，适用于普通拍照及维度胶卷拍摄。Exposure 原事件负责照片语义，`CameraDimensionTeleportEvent` 负责已完成的玩家换维通知。
+曝光失效通过本模组 Before 的输出计划及局部拍摄钩子跳过写卷、截图请求和上传，适用于普通拍照、手持、手动支架及红石支架；对象选择与 Frame 事件仍能执行。无胶卷、满卷等原生拍摄资格检查保留，默认 `NO_IMAGE` 不消耗帧数。`CameraFrameEvent` 管理照片数据，`CameraTransferEvent` 管理每个主体，`CameraCaptureEvent.Completed` 管理整个事务，`CameraDimensionTeleportEvent` 保留成功玩家换维通知。
 
 | 胶卷/入口 | 当前边界 |
 | --- | --- |
 | 玩家维度胶卷 | 手持物理自拍先传送再自拍；支架从同一拍摄名单传送玩家，个人同意和传送保护保留。 |
-| 生物维度胶卷 | 从目标维度选取镜头内符合条件的首个非玩家生物，图片验收后传到相机原维度；曝光失效时无需图片也可完成。普通实体跨维返回新实例。 |
-| 红石维度支架 | 拍原维度、不显示玩家，不渲染或等待目标画面；维度胶卷保留玩家/生物传送。曝光失效保留传送且不成片。 |
+| 生物维度胶卷 | 默认从目标维度选首个非玩家生物，`CameraSubjectsEvent` 可选择多个有效候选；图片验收后传到来源，免成片无需图片也可完成。普通实体跨维返回新实例。 |
+| 红石维度支架 | 默认拍原维度、隐藏玩家，不渲染或等待目标照片；维度胶卷保留玩家/生物传送。Before 可改变该次照片场景或免成片，不能假定它永远没有客户端图像。 |
 
 ## 9. 客户端显示与可选渲染兼容
 
@@ -497,13 +734,13 @@ data/neoforge/loot_modifiers/global_loot_modifiers.json
 
 ## 10. 网络协议和版本要求
 
-当前 NeoForge payload 协议标识为 **`14`**（`ShuttershadowNetwork.PROTOCOL_VERSION`），相机与内核消息共用，消息 ID 使用 `shuttershadow:*`。客户端与服务端需安装兼容发行包且必需通道、协议标识匹配，由 NeoForge 协商判断兼容；没有额外内核版本比较、容忍标记或拒绝开关。
+当前 NeoForge payload 协议标识为 **`16`**（`ShuttershadowNetwork.PROTOCOL_VERSION`），相机与内核消息共用，消息 ID 使用 `shuttershadow:*`。客户端与服务端需安装兼容发行包且必需通道、协议标识匹配，由 NeoForge 协商判断兼容；没有额外内核版本比较、容忍标记或拒绝开关。
 
 配置阶段用空就绪请求/回执记录真实连接，保证初始位置包解码时可判断扩展协议能力；此时玩家对象可能尚未创建。该步骤不携带版本或配置数据。登录维度同步继续保留，登出清理连接就绪状态。
 
 原维度主要由原版区块/实体流程同步，额外世界包用维度标记重定向，原版与相机区块批次使用独立回执。观察会话使用递增序号和当前实际滤镜目标校验，迟到旧场景不能替换新目标；照片使用独立负序号。数据包滤镜注册表沿用 Exposure 原生同步。
 
-远实体同步只刷新有额外订阅或待清理观察者的世界，关闭订阅后仍完成解除配对。无缝玩家传送、载具同步与服务端停机释放继续保留；最后伤害者和攻击目标不由本模组额外清理，不再使用全局生物 tick 战斗引用 Mixin。
+远实体同步只刷新有额外订阅或待清理观察者的世界，关闭订阅后仍完成解除配对。无缝玩家传送和服务端停机释放继续保留，载具不再随相机/API 玩家传送；最后伤害者和攻击目标不由本模组额外清理，不再使用全局生物 tick 战斗引用 Mixin。
 
 网络消息、维度数字 ID 和客户端多世界切换属于内核实现，扩展不应直接拼包替代公共 API。修改包字段、Codec 或双方世界语义时需更新两端并维护协议标识。
 

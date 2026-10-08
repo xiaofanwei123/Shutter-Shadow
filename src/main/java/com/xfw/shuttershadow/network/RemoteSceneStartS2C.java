@@ -8,15 +8,24 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 
-/** 目标场景快照：预览/照片序号、两个原点、比例、视距上限和来源维度。 */
+/** 目标场景快照，保留来源和原滤镜目标身份，允许服务端事件覆盖实际远场。 */
 public record RemoteSceneStartS2C(long sequence,
                                   ResourceLocation dimension,
                                   Vec3 position,
                                   Vec3 sourceOrigin,
                                   double coordinateScale,
                                   int maxRenderDistance,
-                                  ResourceLocation sourceDimension)
+                                  ResourceLocation sourceDimension,
+                                  ResourceLocation requestedDimension)
         implements CustomPacketPayload {
+
+    /** 默认场景目标与滤镜请求目标相同，独立照片沿用此简写。 */
+    public RemoteSceneStartS2C(long sequence, ResourceLocation dimension, Vec3 position,
+                              Vec3 sourceOrigin, double coordinateScale, int maxRenderDistance,
+                              ResourceLocation sourceDimension) {
+        this(sequence, dimension, position, sourceOrigin, coordinateScale, maxRenderDistance,
+                sourceDimension, dimension);
+    }
 
     /** 仅随 Exposure 截图请求传输，不写入照片帧；手动支架照片使用独立的临时会话。 */
     public static final ExtraData.Type<RemoteSceneStartS2C> CAPTURE_SCENE = new ExtraData.Type<>(
@@ -28,7 +37,8 @@ public record RemoteSceneStartS2C(long sequence,
                         scene.getOrDefault(ExtraData.Type.vec3("position"), Vec3.ZERO),
                         scene.getOrDefault(ExtraData.Type.vec3("source_origin"), Vec3.ZERO),
                         scene.getDouble("scale"), scene.getInt("distance"),
-                        ResourceLocation.parse(scene.getString("source_dimension")));
+                        ResourceLocation.parse(scene.getString("source_dimension")),
+                        ResourceLocation.parse(scene.getString("requested_dimension")));
             },
             (data, key, scene) -> {
                 ExtraData tag = new ExtraData();
@@ -39,6 +49,7 @@ public record RemoteSceneStartS2C(long sequence,
                 tag.putDouble("scale", scene.coordinateScale());
                 tag.putInt("distance", scene.maxRenderDistance());
                 tag.putString("source_dimension", scene.sourceDimension().toString());
+                tag.putString("requested_dimension", scene.requestedDimension().toString());
                 data.put(key, tag);
             });
 
@@ -62,6 +73,7 @@ public record RemoteSceneStartS2C(long sequence,
         buf.writeDouble(value.coordinateScale());     // 水平缩放系数
         buf.writeVarInt(value.maxRenderDistance());   // 服务端上限
         buf.writeResourceLocation(value.sourceDimension());
+        buf.writeResourceLocation(value.requestedDimension());
     }
 
     /** 按encode相同顺序解码全部字段。 */
@@ -73,7 +85,7 @@ public record RemoteSceneStartS2C(long sequence,
                 buf.readVec3(),
                 buf.readDouble(),
                 buf.readVarInt(),
-                buf.readResourceLocation());
+                buf.readResourceLocation(), buf.readResourceLocation());
     }
 
     /** 返回remote_scene_start类型。 */

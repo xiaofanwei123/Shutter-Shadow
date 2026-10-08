@@ -56,15 +56,8 @@ public final class SeamlessTeleportCommand {
 
         int successful = 0;
         for (Entity target : targets) {
-            // 先传送的玩家可能已携带并重建同批载具，不能再次操作选择器中的旧副本。
-            Entity current = target;
-            if (target.level() != dimension && target.level() instanceof ServerLevel sourceLevel
-                    && sourceLevel.getEntity(target.getUUID()) != target) {
-                Entity replacement = dimension.getEntity(target.getUUID());
-                if (replacement != null) current = replacement;
-            }
             // 普通实体跨维度后会被替换；非空返回值才表示 API 已确认成功。
-            if (SeamlessTeleportation.teleportEntity(current, dimension, position) != null) successful++;
+            if (SeamlessTeleportation.teleportEntity(target, dimension, position) != null) successful++;
         }
 
         int completed = successful;

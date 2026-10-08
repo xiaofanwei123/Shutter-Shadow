@@ -33,12 +33,13 @@
     "minecraft.server.MixinPlayerList_Misc"
   ],
   "client": [
+    "exposure.CameraClientLifecycleMixin",
     "exposure.BackgroundScreenshotRemoteMixin",
     "exposure.CameraCaptureTemplateRemoteMixin",
     "exposure.ExposureCameraStandStopMixin",
     "exposure.ExposureCameraStandStopControllingMixin",
     "exposure.ViewfinderOverlaySelfieMixin",
-    "exposure.ViewfinderNarcissismMixin",
+    "exposure.ViewfinderInvalidationMixin",
     "minecraft.client.LevelRendererRemotePlayerMixin",
     "minecraft.client.SourceStandEntityRenderMixin",
     "minecraft.client.MixinAbstractClientPlayer",

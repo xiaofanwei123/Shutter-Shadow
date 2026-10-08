@@ -1,6 +1,7 @@
 package com.xfw.shuttershadow.client;
 
 import com.xfw.shuttershadow.api.DimensionFilters;
+import com.xfw.shuttershadow.api.event.CameraViewEvent;
 import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.ShuttershadowConfig;
 import com.xfw.shuttershadow.network.CameraSessionCloseC2S;
@@ -55,7 +56,7 @@ public final class ImmersiveCameraClient {
     private static RemoteSceneStartS2C scene;
     /** 仅在 Exposure 后台截图期间使用，普通游戏画面仍由取景器会话决定。 */
     private static CaptureSnapshot screenshot;
-    private static CameraStandEntity screenshotStand;
+    private static Entity screenshotStand;
 
     /** 单调递增的会话序号，用于匹配请求与响应，防止过期包污染新会话。 */
     private static long nextSequence;
@@ -101,7 +102,7 @@ public final class ImmersiveCameraClient {
     public static void start(RemoteSceneStartS2C message) {
         // 无会话、会话已失效、或序号不匹配 → 丢弃
         if (session == null || !session.valid() || session.sequence() != message.sequence()
-                || !session.mapping().dimension().equals(message.dimension())
+                || !session.mapping().dimension().equals(message.requestedDimension())
                 || !session.sourceLevel().dimension().location().equals(message.sourceDimension())) return;
         scene = message;
     }
@@ -112,6 +113,24 @@ public final class ImmersiveCameraClient {
             RemoteStandCapture.cancel(message.captureSequence());
             SourceStandCapture.cancel(message.captureSequence());
         } else {
+            if (message.captureSequence() > 0
+                    && (session == null || session.sequence() != message.captureSequence())) return;
+            if (message.closeCamera()) {
+                Viewfinder current = CameraClient.viewfinder();
+                if (session == null || !session.valid() || session.sequence() != message.captureSequence()
+                        || current == null || !CameraViewEvents.sameCamera(session.viewfinder().camera(), current.camera())
+                        || !session.mapping().equals(mappingFor(current))) return;
+                try {
+                    CameraViewEvents.close(CameraViewEvent.CloseReason.EVENT_REQUESTED);
+                } finally {
+                    try {
+                        CameraClient.deactivate();
+                    } finally {
+                        stopRemoteScene();
+                    }
+                }
+                return;
+            }
             stopRemoteScene();
         }
     }
@@ -146,24 +165,30 @@ public final class ImmersiveCameraClient {
         // 支架截图状态只存在于一次同步离屏绘制内。
         if (screenshot != null && BackgroundScreenshotCaptureTask.isCapturing()
                 && screenshot.session().validForCapture()) return screenshot;
-        // 五重前置条件：场景已到达、会话存在且有效、相机激活、取景器与建会话时一致
-        if (scene == null || session == null || !session.valid() || !CameraClient.isActive()
-                || CameraClient.viewfinder() != session.viewfinder()
-                || !session.mapping().equals(mappingFor(session.viewfinder()))) return null;
+        return viewSnapshot();
+    }
+
+    /** 只读取玩家当前取景会话，后台照片不会混入观察事件。 */
+    private static CaptureSnapshot viewSnapshot() {
+        Viewfinder current = CameraClient.isActive() ? CameraClient.viewfinder() : null;
+        // 同一相机同步重建取景器后仍使用已确认的场景，真实换相机或路由才停止预览。
+        if (scene == null || session == null || !session.valid() || current == null
+                || !CameraViewEvents.sameCamera(session.viewfinder().camera(), current.camera())
+                || !session.mapping().equals(mappingFor(current))) return null;
         // 从相机物品读取 Y 偏移；无则 0
-        double offset = session.viewfinder().camera()
+        double offset = current.camera()
                 .map((item, stack) -> item.getYPositionOffset(stack)).orElse(0.0D);
         return new CaptureSnapshot(session, scene, offset);
     }
 
-    /** 为手动支架后台截图建立无viewfinder的临时Session、场景及Y偏移，保存支架锚点。 */
-    static void beginScreenshot(RemoteSceneStartS2C scene, CameraStandEntity stand) {
+    /** 为公开拍摄场景建立任意真实持有者的临时镜头，不打开用户取景会话。 */
+    static void beginScreenshot(RemoteSceneStartS2C scene, Entity holder, ItemStack camera) {
         Minecraft mc = Minecraft.getInstance();
-        ItemStack camera = stand.getCamera();
         double offset = camera.getItem() instanceof CameraItem item ? item.getYPositionOffset(camera) : 0.0D;
         screenshot = new CaptureSnapshot(new Session(scene.sequence(), null, null,
-                stand.getId(), mc.getConnection(), (ClientLevel) stand.level()), scene, offset);
-        screenshotStand = stand;
+                holder instanceof CameraStandEntity stand ? stand.getId() : -1,
+                mc.getConnection(), (ClientLevel) holder.level()), scene, offset);
+        screenshotStand = holder;
     }
 
     /** 只清除序号匹配的临时目标截图。 */
@@ -314,11 +339,19 @@ public final class ImmersiveCameraClient {
         Minecraft mc = Minecraft.getInstance();
         // 玩家/连接不存在 → 直接关闭（覆盖登出、断线等场景）
         if (mc.player == null || mc.getConnection() == null) {
-            close();
+            try {
+                CameraViewEvents.close(CameraViewEvent.CloseReason.DISCONNECTED);
+            } finally {
+                close();
+            }
             return;
         }
         // Exposure 的直接截图会保持支架镜头数帧，不能被取景器清理逻辑提前重置。
         if (SourceStandCapture.isRenderingSourceScene()) return;
+        CaptureSnapshot preview = viewSnapshot();
+        CameraViewEvents.tick(preview == null ? null : preview.scene().dimension(),
+                preview == null ? null : preview.targetPosition(
+                        cameraAnchor(preview.session()).position(), 0.0D));
         if (deferredCameraResetTicks > 0) {
             deferredCameraResetTicks--;
         } else {
@@ -336,12 +369,16 @@ public final class ImmersiveCameraClient {
         // 仅在相机激活时取当前取景器
         Viewfinder current = CameraClient.isActive() ? CameraClient.viewfinder() : null;
         DimensionFilters.Route mapping = mappingFor(current);
-        // 已有会话但任一条件变化 → 关闭（换滤镜、换取景器、跨维度、断线）
+        // 真正换相机、换滤镜、跨维度或断线时关闭；同相机同步仅更新取景器。
         int currentStandId = cameraStandId(current);
-        if (session != null && (!session.valid() || session.viewfinder() != current
+        if (session != null && (!session.valid() || current == null
+                || !CameraViewEvents.sameCamera(session.viewfinder().camera(), current.camera())
                 || session.cameraStandId() != currentStandId
                 || !session.mapping().equals(mapping))) {
             close();
+        } else if (session != null && session.viewfinder() != current) {
+            session = new Session(session.sequence(), current, session.mapping(), session.cameraStandId(),
+                    session.connection(), session.sourceLevel());
         }
         // 无会话但有有效映射 → 开启新会话
         if (session == null && mapping != null) {
@@ -438,13 +475,17 @@ public final class ImmersiveCameraClient {
     /** 登出取消全部后台照片并清预览、临时截图、抑制及延后复位状态。 */
     @SubscribeEvent
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut event) {
-        RemoteStandCapture.cancelAll();
-        SourceStandCapture.cancelAll();
-        close();
-        screenshot = null;
-        screenshotStand = null;
-        suppressRemoteScene = false;
-        deferredCameraResetTicks = 0;
+        try {
+            CameraViewEvents.close(CameraViewEvent.CloseReason.DISCONNECTED);
+        } finally {
+            RemoteStandCapture.cancelAll();
+            SourceStandCapture.cancelAll();
+            close();
+            screenshot = null;
+            screenshotStand = null;
+            suppressRemoteScene = false;
+            deferredCameraResetTicks = 0;
+        }
     }
 }
 

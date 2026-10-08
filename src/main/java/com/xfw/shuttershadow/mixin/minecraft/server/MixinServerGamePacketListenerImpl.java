@@ -77,9 +77,9 @@ public abstract class MixinServerGamePacketListenerImpl {
             ip_wrongMovePacketCount += 1;
             
             if (ip_wrongMovePacketCount > 10) {
-                ServerTeleportationManager.of(player.server).forceTeleportPlayer(
-                    player, player.level().dimension(), player.position()
-                );
+                player.connection.teleport(player.getX(), player.getY(), player.getZ(),
+                        player.getYRot(), player.getXRot());
+                player.connection.resetPosition();
                 ip_wrongMovePacketCount = 0;
             }
             

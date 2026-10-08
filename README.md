@@ -2,6 +2,8 @@
 
 Shutter Shadow is an addon for **Exposure** on **Minecraft 1.21.1 / NeoForge**. Look into other dimensions through a camera, photograph the current view, and use dimension film to seamlessly teleport players or bring creatures back.
 
+Documentation: [API and datapacks](wiki/API.md) · [Code and call flows](wiki/CODE.md).
+
 ## Gameplay and features
 
 <p>Place a dimension filter in an Exposure camera's filter slot to view its target dimension with a handheld camera or a manually operated camera stand. Viewing alone leaves you in your original dimension. Install dimension film and take a photo to trigger the corresponding teleportation.</p>
@@ -20,9 +22,9 @@ Shutter Shadow is an addon for **Exposure** on **Minecraft 1.21.1 / NeoForge**. 
 
 <p>Handheld and manually operated stand photos capture the current camera view. They do not wait for every chunk across the entire view range to finish loading.</p>
 
-<p>Redstone-triggered stands with a dimension filter photograph the stand's own dimension. Players are excluded from the image and photo metadata, while dimension film still performs its teleportation. Redstone stands do not photograph the target dimension. Ordinary Exposure stands without a dimension filter retain Exposure's original behavior.</p>
+<p>Redstone-triggered stands with a dimension filter photograph the stand's own dimension. Players are excluded from the image and photo metadata, while dimension film still performs its teleportation. Redstone stands do not photograph the target dimension. Ordinary stands without a dimension filter photograph their own dimension with Exposure's normal player metadata.</p>
 
-<p>Player dimension changes use seamless teleportation, with no additional wait for a 3×3 destination chunk area. A player's direct vehicle, such as a boat or minecart, can travel with them and restore the riding relationship. Other passengers remain in the original dimension; the full passenger tree is not recursively moved.</p>
+<p>Player dimension changes use seamless teleportation, with no additional wait for a 3×3 destination chunk area. Camera teleportation, the API, and <code>/tps</code> move only the selected entity after detaching its riding and passenger relationships. The original vehicle and other passengers remain at the source. If another mod prevents detaching, the transfer is rejected.</p>
 
 <p>Seamless teleportation does not find a safe landing location or guarantee that an ungenerated destination will immediately display complete terrain.</p>
 
@@ -33,7 +35,7 @@ Shutter Shadow is an addon for **Exposure** on **Minecraft 1.21.1 / NeoForge**. 
 <table>
 <thead><tr><th>Enchantment</th><th>Levels and effect</th><th>Survival acquisition</th></tr></thead>
 <tbody>
-<tr><td>Exposure Failure — Camera</td><td>I, curse. Does not generate or upload an image, or add a film frame. Preserves the shutter, Exposure photography events and statistics, and dimension film teleportation. Works with handheld, manual stand and redstone stand captures; usable film must still be installed.</td><td>Nether fortress chests.</td></tr>
+<tr><td>Exposure Failure — Camera</td><td>I, curse. Does not generate or upload an image, or add a film frame. Preserves the shutter, Shutter Shadow's capture and frame events, Exposure statistics and advancements, and dimension film teleportation. Works with handheld, manual stand and redstone stand captures; usable film must still be installed.</td><td>Nether fortress chests.</td></tr>
 <tr><td>Narcissism — Camera</td><td>I, curse. Opens a handheld camera in selfie mode by default; you can switch back manually. Stands have no selfie mode and are unaffected.</td><td>Nether fortress chests.</td></tr>
 <tr><td>Safe Dimension Teleport — Camera</td><td>I–III. After a successful camera-triggered dimension change, gives teleported players Slow Falling and the mod's protection effect for <strong>10 / 20 / 30 seconds</strong>, based on the camera's enchantment level. Works with handheld, manual stand and redstone stand captures.</td><td>End ship chests only; regular End city chests do not receive the extra book.</td></tr>
 </tbody>
@@ -55,6 +57,7 @@ Shutter Shadow is an addon for **Exposure** on **Minecraft 1.21.1 / NeoForge**. 
 
 <div class="spoiler">
 <p>Requires <strong>Minecraft 1.21.1, Java 21, NeoForge, and Exposure</strong>. Install Shutter Shadow and Exposure on both the client and server. The mod declares Exposure <strong>1.9.19 or newer</strong>; compatibility with future versions still needs verification.</p>
+<p>The current NeoForge network protocol identifier is <strong>16</strong>. Clients and servers need matching required channels and protocol identifiers; compatibility is negotiated by NeoForge.</p>
 <table>
 <thead><tr><th>Mod</th><th>Current development test version</th><th>Compatibility notes</th></tr></thead>
 <tbody>
@@ -106,6 +109,7 @@ Shutter Shadow is an addon for **Exposure** on **Minecraft 1.21.1 / NeoForge**. 
 <tr><td><code>core.enableWarning</code></td><td><code>true</code></td><td>Enables or disables all runtime in-game warnings, including memory and Iris notices. Independent from logging.</td></tr>
 </tbody>
 </table>
+<p><strong>Local logging:</strong> <code>enableLogging</code> in <code>config/shuttershadow-core.toml</code> defaults to <code>false</code>. It controls this mod's log output on the local client or server, independently of in-game warnings and camera event chat messages.</p>
 </div>
 
 ## Datapacks and dimension filters
@@ -128,8 +132,14 @@ Shutter Shadow is an addon for **Exposure** on **Minecraft 1.21.1 / NeoForge**. 
 <p><code>shuttershadow:dimension_filter_target</code> specifies the destination. This format allows viewing the Overworld from other dimensions without a source-dimension list or a manually configured scale. The target dimension must exist on the server. A filter does not create a cross-dimensional view when its target is the current dimension.</p>
 <p>Put filter item models in a resource pack using the corresponding path:</p>
 <pre><code>assets/shuttershadow/models/item/dimension_filter/&lt;target dimension namespace&gt;/&lt;target dimension path&gt;.json</code></pre>
-<p>Custom textures, models and translations need their corresponding resource pack. The creative tab automatically lists target variants registered with the above item and component predicate. Datapack details and Java APIs for seamless teleportation, chunk loading, dimension filters and camera dimension-change events are documented in the API documentation.</p>
+<p>Custom textures, models and translations need their corresponding resource pack. The creative tab automatically lists target variants registered with the above item and component predicate. Datapack definitions, optional source routes and Java extension contracts are documented in the <a href="wiki/API.md">API Wiki</a>.</p>
 </div>
+
+## Extension APIs and maintenance
+
+<p>Public APIs cover seamless single-entity teleportation, extra chunk subscriptions and dimension filter utilities. Camera events on the NeoForge game event bus let addons configure opening mode and observation scenes, edit a capture plan before it is frozen, select photo or transfer subjects, change frame data or the client image, control individual transfers, and inspect actual completion results. The default player-film and creature-film flows still use internal transaction managers to coordinate dimension changes, screenshots and uploads.</p>
+<p>The camera capture path replaces Exposure's three metadata/frame events with Shutter Shadow's events, including ordinary cameras without dimension attachments. Addons listening to those Exposure events need to use the new API. Exposure's native metadata generation, statistics, advancements and photographed-entity behavior continue to run. Exposure Failure uses the <code>NO_IMAGE</code> plan: it still produces logical capture/frame events and can teleport, but never produces an image-ready event.</p>
+<p>The current source includes an enabled in-game event tracer, <code>CameraEventTest</code>. It prints opening, observation, capture and transfer stages to the relevant player's chat. <code>CameraEventTest.ENABLED</code> controls it independently of the logging and warning switches. See the <a href="wiki/CODE.md">Code Wiki</a> for class responsibilities, resource ownership and call flows.</p>
 
 ## Q&A
 
@@ -162,6 +172,8 @@ Shutter Shadow is an addon for **Exposure** on **Minecraft 1.21.1 / NeoForge**. 
 
 Exposure 模组的扩展。通过相机观察其他维度、拍摄当前取景画面，并使用维度胶卷无缝传送玩家或带回生物。
 
+文档：[API 与数据包扩展](wiki/API.md) · [代码职责与调用流程](wiki/CODE.md)。
+
 ## 玩法与功能
 
 <p>将维度滤镜放入 Exposure 相机的滤镜槽，即可通过手持相机或手动操作的支架相机观察目标维度。观察期间玩家仍在原维度；安装维度胶卷并拍摄，才会触发对应传送。</p>
@@ -178,9 +190,9 @@ Exposure 模组的扩展。通过相机观察其他维度、拍摄当前取景�
 
 <p>本模组创造物品栏提供已注册的滤镜变体、两种维度胶卷及各级相机附魔书。</p>
 
-<p>手持和手动支架的照片采用玩家当前看到的相机画面，不等待整个取景范围的区块全部加载。红石触发带维度滤镜的支架时，拍摄的是支架所在维度，照片画面和元数据排除玩家，然后完成维度胶卷传送；它不拍摄目标维度。没有维度滤镜的普通 Exposure 支架保留原生拍摄行为。</p>
+<p>手持和手动支架的照片采用玩家当前看到的相机画面，不等待整个取景范围的区块全部加载。红石触发带维度滤镜的支架时，拍摄的是支架所在维度，照片画面和元数据排除玩家，然后完成维度胶卷传送；它不拍摄目标维度。没有维度滤镜的普通支架拍摄原维度，保留 Exposure 原生玩家元数据识别。</p>
 
-<p>玩家跨维度采用无缝传送，不额外等待目的地周围 3×3 区块。玩家正在乘坐的直接载具，例如船或矿车，可随玩家跨维并恢复骑乘；其他乘客留在原维度，不递归传送整棵乘客树。无缝传送不会自动寻找安全落点，也不保证未生成的目的地立即显示完整地形。</p>
+<p>玩家跨维度采用无缝传送，不额外等待目的地周围 3×3 区块。相机传送、API 和 <code>/tps</code> 都只移动选中的主体，先解除其骑乘和乘客关系；原载具与其他乘客留在原地，不随行。其他模组若阻止解除关系，本次传送会被拒绝。无缝传送不会自动寻找安全落点，也不保证未生成的目的地立即显示完整地形。</p>
 
 ## 相机附魔
 
@@ -189,7 +201,7 @@ Exposure 模组的扩展。通过相机观察其他维度、拍摄当前取景�
 <table>
 <thead><tr><th>附魔</th><th>等级与效果</th><th>生存获取方式</th></tr></thead>
 <tbody>
-<tr><td>曝光失效-相机</td><td>I，诅咒。拍摄不生成或上传图片、不增加胶卷帧数，保留快门、Exposure 拍摄事件、统计及维度胶卷传送。手持、手动支架和红石支架均有效；仍需装入可拍摄的胶卷。</td><td>下界要塞宝箱。</td></tr>
+<tr><td>曝光失效-相机</td><td>I，诅咒。拍摄不生成或上传图片、不增加胶卷帧数，保留快门、本模组拍摄与整帧事件、Exposure 统计和进度，以及维度胶卷传送。手持、手动支架和红石支架均有效；仍需装入可拍摄的胶卷。</td><td>下界要塞宝箱。</td></tr>
 <tr><td>自恋狂-相机</td><td>I，诅咒。每次打开手持相机时默认进入自拍，可手动切回远景；支架没有自拍功能，不受影响。</td><td>下界要塞宝箱。</td></tr>
 <tr><td>安全传送维度-相机</td><td>I～III，正面附魔。相机拍摄成功换维后，按相机等级为被传送玩家给予 <strong>10／20／30 秒</strong>的缓降及安全传送效果。手持、手动支架、红石支架均适用。</td><td>末地船宝箱，普通末地城宝箱不追加。</td></tr>
 </tbody>
@@ -210,6 +222,7 @@ Exposure 模组的扩展。通过相机观察其他维度、拍摄当前取景�
 
 <div class="spoiler">
 <p>客户端与服务端均须安装 Shutter Shadow、Exposure <strong>1.9.19</strong> 或更新版本，后续版本兼容性仍需核实。</p>
+<p>当前 NeoForge 网络协议标识为 <strong>16</strong>。双方需要匹配必需通道和协议标识，由 NeoForge 协商判断兼容性。</p>
 <table>
 <thead><tr><th>模组</th><th>当前开发检查版本</th><th>兼容说明</th></tr></thead>
 <tbody>
@@ -260,6 +273,7 @@ Exposure 模组的扩展。通过相机观察其他维度、拍摄当前取景�
 <tr><td><code>core.enableWarning</code></td><td><code>true</code></td><td>统一开启或关闭全部内核游戏内提醒，包括内存和 Iris 提醒；与日志开关独立。</td></tr>
 </tbody>
 </table>
+<p><strong>本地日志：</strong><code>config/shuttershadow-core.toml</code> 中的 <code>enableLogging</code> 默认为 <code>false</code>，只控制本机客户端或服务器的模组日志，与游戏内警告和相机事件聊天消息独立。</p>
 </div>
 
 ## 数据包与滤镜
@@ -282,8 +296,14 @@ Exposure 模组的扩展。通过相机观察其他维度、拍摄当前取景�
 <p><code>shuttershadow:dimension_filter_target</code> 指定目标维度。只写以上结构即可从其他维度观察主世界，无需来源路由或距离比例字段；目标维度必须在服务器实际存在，同维度不建立跨维度观察。</p>
 <p>滤镜物品模型采用相同的维度路径，放在资源包中：</p>
 <pre><code>assets/shuttershadow/models/item/dimension_filter/&lt;目标维度命名空间&gt;/&lt;目标维度路径&gt;.json</code></pre>
-<p>自定义纹理、模型和译名需要相应资源包。新增符合上述物品和目标组件谓词的滤镜定义后，创造物品栏会自动列出其目标变体。数据包配置及 Java API（无缝传送、区块加载、滤镜工具、相机换维事件）详见 API 文档。</p>
+<p>自定义纹理、模型和译名需要相应资源包。新增符合上述物品和目标组件谓词的滤镜定义后，创造物品栏会自动列出其目标变体。数据包定义、可选来源路由和 Java 扩展契约详见 <a href="wiki/API.md">API Wiki</a>。</p>
 </div>
+
+## 扩展 API 与维护
+
+<p>公开 API 提供单主体无缝传送、额外区块订阅和维度滤镜工具。相机事件发布到 NeoForge 游戏事件总线，允许扩展设置打开模式和观察场景，在拍摄前修改计划，选择照片或传送对象，修改帧数据及客户端图片，控制单个对象的传送，并读取真实完成结果。默认玩家胶卷和生物胶卷仍由内部事务管理器协调换维、截图与上传。</p>
+<p>当前拍摄流程已将 Exposure 的三种元数据／帧事件替换为本模组事件，也包括未安装维度附件的普通相机；依赖这些 Exposure 事件的扩展需要接入新 API。Exposure 原生元数据生成、统计、进度和实体被拍行为继续执行。曝光失效采用 <code>NO_IMAGE</code> 计划：仍有逻辑拍摄、整帧事件及胶卷传送，但不会出现图片就绪事件。</p>
+<p>当前源码保留已启用的游戏内事件测试监听器 <code>CameraEventTest</code>，向相关玩家的聊天栏显示打开、观察、拍摄及传送阶段。它由 <code>CameraEventTest.ENABLED</code> 控制，与日志总开关和游戏内警告开关独立。类职责、资源所有权和调用流程见 <a href="wiki/CODE.md">代码 Wiki</a>。</p>
 
 ## Q&A
 

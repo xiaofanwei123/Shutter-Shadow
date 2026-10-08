@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.Queue;
 import java.util.function.BooleanSupplier;
 
-/** 衔接原版及相机订阅，保护无缝实体交接并限制关服卸载循环。 */
+/** 衔接原版及相机订阅，保护无缝玩家交接并限制关服卸载循环。 */
 @Mixin(ChunkMap.class)
 public abstract class MixinChunkMap_C implements IEChunkMap {
     @Shadow @Final private ServerLevel level;
@@ -103,7 +103,7 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
         PacketRedirection.withForceRedirect(level, () -> original.call(chunks));
     }
 
-    /** 接管正在无缝交接的实体移除，保留跨维度迁移状态。 */
+    /** 接管无缝玩家移除，释放旧实体配对并保留其远景观察关系。 */
     @VanillaRuntimeHooks
     @Inject(
         method = "Lnet/minecraft/server/level/ChunkMap;removeEntity(Lnet/minecraft/world/entity/Entity;)V",
@@ -112,21 +112,16 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
     )
     private void onUnloadEntity(Entity entity, CallbackInfo ci) {
         // 玩家离开本维度后，按相机订阅继续跟踪远景实体。
-        if (ServerTeleportationManager.of(entity.getServer()).isTeleporting(entity)) {
-            if (entity instanceof ServerPlayer player) {
-                Object tracker = entityMap.remove(entity.getId());
-                if (tracker != null) {
-                    ((IETrackedEntity) tracker).ip_stopTrackingExcept(null);
-                }
-                entityMap.values().forEach(tracked ->
-                        ((IETrackedEntity) tracked).ip_onPlayerDimensionChange(player));
-                // 原版负责释放 playerMap、tickets、旧视野和旧待发送区块。
-                updatePlayerStatus(player, false);
+        if (entity instanceof ServerPlayer player
+                && ServerTeleportationManager.of(player.getServer()).isTeleporting(player)) {
+            TrackedEntity tracker = entityMap.remove(player.getId());
+            if (tracker != null) {
+                ((IETrackedEntity) tracker).ip_stopTracking();
             }
-            else {
-                entityMap.remove(entity.getId());
-            }
-
+            entityMap.values().forEach(tracked ->
+                    ((IETrackedEntity) tracked).ip_onPlayerDimensionChange(player));
+            // 原版负责释放 playerMap、tickets、旧视野和旧待发送区块。
+            updatePlayerStatus(player, false);
             ci.cancel();
         }
     }
@@ -139,7 +134,7 @@ public abstract class MixinChunkMap_C implements IEChunkMap {
         });
     }
 
-    /** 返回 entityMap 实际追踪器表，供多人载具移交和跨维观察者同步，不复制表。 */
+    /** 返回 entityMap 实际追踪器表，供跨维观察者同步，不复制表。 */
     @Override
     public Int2ObjectMap<TrackedEntity> ip_getEntityTrackerMap() {
         return entityMap;

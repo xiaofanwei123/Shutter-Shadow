@@ -45,7 +45,8 @@ public final class RemoteCaptureContext implements CameraHolder {
     private RemoteCaptureContext(CameraHolder source, RemoteCameraSession session,
                                  ServerPlayer player, Entity cameraEntity) {
         this(source, cameraEntity, session.remoteLevel(), session.coordinateScale(),
-                session.sourceOrigin(), session.targetCameraPosition(player), session.cameraStandId());
+                session.cameraStandId() >= 0 ? session.sourceOrigin() : cameraEntity.position(),
+                session.targetCameraPosition(player), session.cameraStandId());
     }
 
     /** 保存坐标映射与来源Holder，创建不加入世界实体列表的目标观察实体。 */
@@ -73,6 +74,14 @@ public final class RemoteCaptureContext implements CameraHolder {
     /** 为纯传送读取路由，不受红石照片必须留在源维度的限制。 */
     public static RemoteCaptureContext resolveForTransfer(CameraHolder source, ItemStack camera) {
         return resolveRoute(source, camera);
+    }
+
+    /** 按拍摄计划建立目标镜头，不改变实体真实世界或等待玩家目的地区块。 */
+    public static RemoteCaptureContext create(CameraHolder source, ServerLevel target, Vec3 position,
+                                               double scale, Vec3 sourceOrigin) {
+        Entity entity = source.asHolderEntity();
+        return new RemoteCaptureContext(source, entity, target, scale, sourceOrigin, position,
+                entity instanceof CameraStandEntity ? entity.getId() : -1);
     }
 
     /** 确认当前摄影师身份和相机类型，验证当前滤镜路由与会话一致。 */
@@ -167,9 +176,14 @@ public final class RemoteCaptureContext implements CameraHolder {
 
     /** 目标位置相对目标原点的偏移按比例反算回真实源相机位置。 */
     public Vec3 sourcePosition(Vec3 targetPosition) {
-        Vec3 delta = targetPosition.subtract(targetOrigin);
         // 手持相机可在打开后移动；当前 targetOrigin 对应当前源位置，而非打开时的 sourceOrigin。
-        return source.asHolderEntity().position().add(
+        return sourcePosition(targetPosition, source.asHolderEntity().position());
+    }
+
+    /** 以指定来源锚点反算位置，自拍换维后仍可把生物送回原镜头。 */
+    public Vec3 sourcePosition(Vec3 targetPosition, Vec3 sourceAnchor) {
+        Vec3 delta = targetPosition.subtract(targetOrigin);
+        return sourceAnchor.add(
                 delta.x / coordinateScale, delta.y, delta.z / coordinateScale);
     }
 

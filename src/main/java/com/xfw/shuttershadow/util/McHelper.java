@@ -14,7 +14,7 @@ import net.minecraft.world.phys.Vec3;
 import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
 
 // 游戏世界与实体相关的辅助方法。
-/** 跨维度实体位置/眼高/载具与现有区块状态工具。 */
+/** 跨维度实体位置、眼高与现有区块状态工具。 */
 public class McHelper {
     
     /** 取得实体上一游戏刻的脚底位置。 */
@@ -54,36 +54,6 @@ public class McHelper {
             eyePos.subtract(eyeOffset),
             lastTickEyePos.subtract(eyeOffset)
         );
-    }
-    
-    /** 保留载具速度，将载具及其插值位置对齐到乘客。 */
-    public static void adjustVehicle(Entity entity) {
-        Entity vehicle = entity.getVehicle();
-        if (vehicle == null) {
-            return;
-        }
-        
-        Vec3 vehicleOffset = entity.getVehicleAttachmentPoint(vehicle);
-        
-        Vec3 currVelocity = vehicle.getDeltaMovement();
-        
-        Vec3 newVehiclePos = entity.position().add(vehicleOffset);
-        Vec3 newVehicleLastTickPos = McHelper.lastTickPosOf(entity).add(vehicleOffset);
-        
-        // 矿车、船和生物实体使用位置插值，
-        // 此处直接更新位置，避免插值经过未加载区块。
-        vehicle.setPos(newVehiclePos.x(), newVehiclePos.y(), newVehiclePos.z());
-        vehicle.lerpTo(
-            newVehiclePos.x(), newVehiclePos.y(), newVehiclePos.z(),
-            vehicle.getYRot(), vehicle.getXRot(), 0
-        );
-        
-        McHelper.setPosAndLastTickPos(
-            vehicle, newVehiclePos, newVehicleLastTickPos
-        );
-        
-        vehicle.setDeltaMovement(currVelocity);
-        
     }
     
     /** 取得已可运行的现有区块，不触发区块创建。 */

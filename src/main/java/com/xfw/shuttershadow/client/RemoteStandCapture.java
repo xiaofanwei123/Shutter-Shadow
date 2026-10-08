@@ -16,6 +16,9 @@ import io.github.mortuusars.exposure.world.entity.CameraStandEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.ItemStack;
+import io.github.mortuusars.exposure.world.entity.CameraOperator;
 import net.neoforged.neoforge.network.PacketDistributor;
 import com.xfw.shuttershadow.access.IEGameRenderer;
 import com.xfw.shuttershadow.access.IECamera;
@@ -35,7 +38,7 @@ public final class RemoteStandCapture extends Capture<Image> {
     private final ClientPacketListener connection = Minecraft.getInstance().getConnection();
 
     /** 过滤会长期改变界面的HideGuiAction和SetCameraEntityAction，组合其余动作后委托私有构造器。 */
-    public RemoteStandCapture(RemoteSceneStartS2C scene, CameraStandEntity stand, CaptureAction[] actions) {
+    public RemoteStandCapture(RemoteSceneStartS2C scene, Entity stand, CaptureAction[] actions) {
         this(scene, stand, new CompositeAction(Arrays.stream(actions)
                 .filter(action -> !(action instanceof HideGuiAction)
                         && !(action instanceof SetCameraEntityAction))
@@ -43,7 +46,7 @@ public final class RemoteStandCapture extends Capture<Image> {
     }
 
     /** 创建目标维度截图任务并登记完成回调。 */
-    private RemoteStandCapture(RemoteSceneStartS2C scene, CameraStandEntity stand,
+    private RemoteStandCapture(RemoteSceneStartS2C scene, Entity stand,
                                CaptureAction actions) {
         super(new PreparedScreenshot(scene, stand, actions), delayOnly(actions));
         ACTIVE.put(scene.sequence(), this);
@@ -115,11 +118,11 @@ public final class RemoteStandCapture extends Capture<Image> {
     /** 执行单次目标维度截图并确保恢复渲染状态。 */
     private static final class PreparedScreenshot extends BackgroundScreenshotCaptureTask {
         private final RemoteSceneStartS2C scene;
-        private final CameraStandEntity stand;
+        private final Entity stand;
         private final CaptureAction actions;
 
         /** 保存固定场景、支架和捕获动作。 */
-        private PreparedScreenshot(RemoteSceneStartS2C scene, CameraStandEntity stand,
+        private PreparedScreenshot(RemoteSceneStartS2C scene, Entity stand,
                                    CaptureAction actions) {
             this.scene = scene;
             this.stand = stand;
@@ -150,7 +153,10 @@ public final class RemoteStandCapture extends Capture<Image> {
             ((IECamera) temporaryCamera).ip_setCameraY(stand.getEyeHeight(), stand.getEyeHeight());
             renderer.ip_setCamera(temporaryCamera);
             mc.cameraEntity = stand;
-            ImmersiveCameraClient.beginScreenshot(scene, stand);
+            ItemStack camera = stand instanceof CameraStandEntity cameraStand ? cameraStand.getCamera()
+                    : stand instanceof CameraOperator operator && operator.getActiveExposureCamera() != null
+                    ? operator.getActiveExposureCamera().getItemStack() : ItemStack.EMPTY;
+            ImmersiveCameraClient.beginScreenshot(scene, stand, camera);
             renderingScreenshot = this;
             try {
                 actions.beforeCapture();

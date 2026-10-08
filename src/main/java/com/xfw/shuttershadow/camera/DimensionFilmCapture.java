@@ -4,10 +4,9 @@ import com.xfw.shuttershadow.Shuttershadow;
 import com.xfw.shuttershadow.item.PlayerDimensionFilmRollItem;
 
 import com.xfw.shuttershadow.network.DimensionFilmStartS2C;
-import com.xfw.shuttershadow.api.SeamlessTeleportation;
 import com.xfw.shuttershadow.api.CameraDimensionTeleportEvent;
+import com.xfw.shuttershadow.api.CameraCaptureContext;
 import com.xfw.shuttershadow.network.RemoteCameraSession;
-import com.xfw.shuttershadow.api.DimensionFilters;
 import io.github.mortuusars.exposure.world.entity.CameraHolder;
 import io.github.mortuusars.exposure.world.entity.CameraOperator;
 import io.github.mortuusars.exposure.world.entity.CameraStandEntity;
@@ -15,7 +14,6 @@ import io.github.mortuusars.exposure.world.camera.CameraOnStand;
 import io.github.mortuusars.exposure.world.item.camera.Attachment;
 import io.github.mortuusars.exposure.world.item.camera.CameraItem;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -32,7 +30,6 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,11 +65,6 @@ public final class DimensionFilmCapture {
         CALLING_EXPOSURE
     }
 
-    /** 来源维度、玩家脚底位置与群系记录，供传送后照片保留来源信息。 */
-    static record SourceSnapshot(ResourceLocation dimension, Vec3 position,
-                                 ResourceLocation biome) {
-    }
-
     /** 单个玩家胶卷自拍事务，持有原相机引用、目标维度、来源快照、状态及年龄。 */
     private static final class Pending {
         private final long transaction;
@@ -80,33 +72,27 @@ public final class DimensionFilmCapture {
         private final CameraItem item;
         private final CameraHolder holder;
         private final ItemStack camera;
-        private final ResourceKey<Level> targetDimension;
-        private final SourceSnapshot source;
+        private final CameraCaptureContext context;
+        private final ItemStack film;
+        private final ItemStack filter;
+        private ResourceKey<Level> targetDimension;
         private State state = State.WAITING_FOR_CLIENT;
         private int age;
 
         /** 保存事务参数。 */
         private Pending(long transaction, ServerPlayer player, CameraItem item,
                         CameraHolder holder, ItemStack camera,
-                        ResourceKey<Level> targetDimension, SourceSnapshot source) {
+                        ResourceKey<Level> targetDimension) {
             this.transaction = transaction;
             this.player = player;
             this.item = item;
             this.holder = holder;
             this.camera = camera;
+            context = CameraCaptureEvents.context(camera);
+            film = Attachment.FILM.get(camera).getForReading().copy();
+            filter = Attachment.FILTER.get(camera).getForReading().copy();
             this.targetDimension = targetDimension;
-            this.source = source;
         }
-    }
-
-    /** 仅当该操作者事务处于CALLING_EXPOSURE时提供传送前来源快照，给照片额外数据使用。 */
-    static SourceSnapshot activeSource(CameraHolder holder) {
-        ServerPlayer player = holder.getServerPlayerExecutingExposure().orElse(null);
-        if (player == null) return null;
-
-        Pending pending = PENDING.get(player.getUUID());
-        return pending != null && pending.state == State.CALLING_EXPOSURE
-                ? pending.source : null;
     }
 
     /** 拦截手持玩家胶卷自拍，解析当前滤镜路由，保存来源快照，开启事务、传送并发送DimensionFilmStart。 */
@@ -122,86 +108,91 @@ public final class DimensionFilmCapture {
             return current.state != State.CALLING_EXPOSURE;
         }
 
-        if (!hasDimensionFilmSelfie(item, camera)) return false;
-
-        ItemStack filter = Attachment.FILTER.get(camera).getForReading();
-        DimensionFilters.Route mapping = DimensionFilters.resolve(
-                filter, player.serverLevel().dimension().location());
-        if (mapping == null) return false;
-
-        ResourceKey<Level> targetKey = ResourceKey.create(Registries.DIMENSION, mapping.dimension());
+        if (!item.isInSelfieMode(camera) || !CameraCaptureEvents.transfersPlayers(camera)) return false;
+        var plan = CameraCaptureEvents.plan(camera);
+        ResourceKey<Level> targetKey = ResourceKey.create(Registries.DIMENSION, plan.getPlayerDimension());
         ServerLevel target = player.getServer().getLevel(targetKey);
         if (target == null) return false;
 
-        double scale = DimensionFilters.horizontalScale(player.serverLevel(), target);
-        Vec3 targetPosition = DimensionFilters.mapAbsolute(player.position(), scale);
+        Vec3 targetPosition = CameraCaptureEvents.playerDestination(camera, player, target);
         long transaction = ++nextTransaction;
-        SourceSnapshot source = snapshot(player);
         Pending created = new Pending(transaction, player, item, holder, camera,
-                targetKey, source);
+                targetKey);
         PENDING.put(player.getUUID(), created);
 
         try {
             // 无缝传送保留玩家实例和相机界面，
             // 只替换客户端世界，避免原版重生和加载界面。
-            teleport(player, targetKey, targetPosition, camera);
+            List<ServerPlayer> selected = CameraCaptureEvents.selectPlayers(camera, List.of(player));
+            if (selected.isEmpty() || !teleport(player, targetKey, targetPosition, camera)) {
+                PENDING.remove(player.getUUID(), created);
+                return false;
+            }
+            created.targetDimension = player.level().dimension();
             PacketDistributor.sendToPlayer(player,
-                    new DimensionFilmStartS2C(transaction, targetKey.location()));
+                    new DimensionFilmStartS2C(transaction, created.targetDimension.location()));
             return true;
         } catch (RuntimeException exception) {
             PENDING.remove(player.getUUID(), created);
             PORTAL_TRANSFER_LOCKS.remove(player.getUUID());
-            return false;
+            throw exception;
         }
     }
 
     /** 支架普通入口：确认玩家胶卷，解析远场并计算出镜玩家后委托列表重载。 */
     public static void teleportStandPlayersAfterPhoto(CameraHolder holder, ItemStack camera) {
-        if (!(holder.asHolderEntity() instanceof CameraStandEntity) || !hasPlayerDimensionFilm(camera)) return;
-        RemoteCaptureContext remote = RemoteCaptureContext.resolve(holder, camera);
+        if (!(holder.asHolderEntity() instanceof CameraStandEntity) || !CameraCaptureEvents.transfersPlayers(camera)) return;
+        RemoteCaptureContext remote = CameraCaptureEvents.playerContext(camera);
         if (remote == null) return;
-        teleportStandPlayersAfterPhoto(remote, camera, remote.playersInFrame(camera));
+        teleportStandPlayersAfterPhoto(remote, camera, CameraCaptureEvents.selectPlayers(camera, remote.playersInFrame(camera)));
     }
 
     /** 对冻结的出镜玩家逐个确认存活、来源世界、在线身份及个人同意状态。 */
     public static void teleportStandPlayersAfterPhoto(RemoteCaptureContext remote, ItemStack camera,
                                                        List<ServerPlayer> players) {
-        if (!hasPlayerDimensionFilm(camera)) return;
+        if (!CameraCaptureEvents.transfersPlayers(camera)) return;
         Level sourceLevel = remote.source().asHolderEntity().level();
         for (ServerPlayer player : players) {
             if (player.isAlive() && !player.isRemoved() && player.level() == sourceLevel
                     && player.getServer().getPlayerList().getPlayer(player.getUUID()) == player
                     && acceptsStandTeleport(player)) {
                 // 跨维后源支架已无法找到操作者，必须在离开前完整注销其控制状态。
-                CameraOperator operator = (CameraOperator) player;
-                if (operator.getActiveExposureCamera() instanceof CameraOnStand onStand
-                        && onStand.getOperator() == operator
-                        && onStand.getStand() == remote.source().asHolderEntity()) {
-                    onStand.getStand().stopControlling();
-                    operator.removeActiveExposureCamera();
-                }
-                // 必须先停止源维度取景会话，避免它在真实传送后重新接管画面。
-                RemoteCameraSession.close(player);
-                teleport(player, remote.level().dimension(), remote.targetPosition(player), camera);
-                // 让客户端先处理 IP 的世界切换，再结束 Exposure 的远程相机状态。
-                RemoteCameraSession.finishDimensionTeleport(player);
+                boolean moved = teleport(player, remote.level().dimension(),
+                        CameraCaptureEvents.playerDestination(camera, player, remote.level()), camera, () -> {
+                            CameraOperator operator = (CameraOperator) player;
+                            if (operator.getActiveExposureCamera() instanceof CameraOnStand onStand
+                                    && onStand.getOperator() == operator
+                                    && onStand.getStand() == remote.source().asHolderEntity()) {
+                                onStand.getStand().stopControlling();
+                                operator.removeActiveExposureCamera();
+                            }
+                            RemoteCameraSession.close(player);
+                        });
+                if (moved) RemoteCameraSession.finishDimensionTeleport(player);
             }
         }
     }
 
     /** 执行明确的胶卷传送，成功换维后发布相机传送完成事件。 */
-    private static void teleport(ServerPlayer player, ResourceKey<Level> targetKey, Vec3 targetPosition,
+    private static boolean teleport(ServerPlayer player, ResourceKey<Level> targetKey, Vec3 targetPosition,
                                  ItemStack camera) {
+        return teleport(player, targetKey, targetPosition, camera, () -> {});
+    }
+
+    /** 获准传送后才清理支架来源状态，取消请求不退出取景器。 */
+    private static boolean teleport(ServerPlayer player, ResourceKey<Level> targetKey, Vec3 targetPosition,
+                                     ItemStack camera, Runnable beforeMove) {
         ResourceKey<Level> sourceDimension = player.level().dimension();
         UUID uuid = player.getUUID();
         PORTAL_TRANSFER_LOCKS.put(uuid, PORTAL_TRANSFER_LOCK_TICKS);
         EXPLICIT_TRANSFERS.add(uuid);
         try {
-            if (SeamlessTeleportation.teleportPlayer(player,
-                    player.getServer().getLevel(targetKey), targetPosition) != null
-                    && !sourceDimension.equals(player.level().dimension())) {
+            ServerPlayer moved = CameraTransfers.teleportPlayer(player,
+                    player.getServer().getLevel(targetKey), targetPosition, camera, beforeMove);
+            if (moved == null) { PORTAL_TRANSFER_LOCKS.remove(uuid); return false; }
+            if (!sourceDimension.equals(player.level().dimension()))
                 NeoForge.EVENT_BUS.post(new CameraDimensionTeleportEvent(player, camera, sourceDimension));
-            }
+            return true;
         } finally {
             EXPLICIT_TRANSFERS.remove(uuid);
         }
@@ -231,14 +222,25 @@ public final class DimensionFilmCapture {
     public static void clientReady(ServerPlayer player, long transaction) {
         Pending pending = PENDING.get(player.getUUID());
         if (pending == null || pending.transaction != transaction
-                || pending.state != State.WAITING_FOR_CLIENT
-                || !player.level().dimension().equals(pending.targetDimension)
-                || !hasDimensionFilmSelfie(pending.item, pending.camera)) {
+                || pending.state != State.WAITING_FOR_CLIENT) {
+            return;
+        }
+        var active = ((CameraOperator) player).getActiveExposureCamera();
+        if (!player.level().dimension().equals(pending.targetDimension)
+                || active == null || active.getItemStack() != pending.camera
+                || !ItemStack.isSameItemSameComponents(pending.film, Attachment.FILM.get(pending.camera).getForReading())
+                || !ItemStack.isSameItemSameComponents(pending.filter, Attachment.FILTER.get(pending.camera).getForReading())
+                || !pending.item.isInSelfieMode(pending.camera)
+                || !CameraCaptureEvents.transfersPlayers(pending.camera)
+                || !pending.item.canTakePhoto(pending.holder, pending.camera)) {
+            PENDING.remove(player.getUUID(), pending);
+            CameraCaptureEvents.failed(pending.context, "自拍恢复时相机或附件已经变化");
             return;
         }
 
         if (!(pending.item instanceof TakePhotoInvoker invoker)) {
             PENDING.remove(player.getUUID(), pending);
+            CameraCaptureEvents.failed(pending.context, "原生相机拍摄入口不可用");
             return;
         }
 
@@ -253,22 +255,6 @@ public final class DimensionFilmCapture {
         }
     }
 
-    /** 拍摄事务开始时记录来源维度、位置与当前位置群系。 */
-    private static SourceSnapshot snapshot(ServerPlayer player) {
-        ResourceLocation biome = player.serverLevel().getBiome(player.blockPosition())
-                .unwrapKey()
-                .map(key -> key.location())
-                .orElse(null);
-        return new SourceSnapshot(player.level().dimension().location(),
-                player.position(), biome);
-    }
-
-    /** 确认相机在自拍模式且满足玩家维度胶卷条件。 */
-    private static boolean hasDimensionFilmSelfie(CameraItem item, ItemStack camera) {
-        if (!item.isInSelfieMode(camera)) return false;
-        return hasPlayerDimensionFilm(camera);
-    }
-
     /** 确认附件胶卷为PlayerDimensionFilmRollItem且滤镜非空。 */
     public static boolean hasPlayerDimensionFilm(ItemStack camera) {
         ItemStack film = Attachment.FILM.get(camera).getForReading();
@@ -279,13 +265,13 @@ public final class DimensionFilmCapture {
     /** 移除死亡、离线、过期或不再等待客户端的事务。 */
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
-        Iterator<Map.Entry<UUID, Pending>> iterator = PENDING.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Pending pending = iterator.next().getValue();
+        for (Pending pending : List.copyOf(PENDING.values())) {
             if (!pending.player.isAlive() || pending.player.isRemoved()
                     || pending.state != State.WAITING_FOR_CLIENT
                     || ++pending.age > READY_TIMEOUT_TICKS) {
-                iterator.remove();
+                if (PENDING.remove(pending.player.getUUID(), pending)) {
+                    CameraCaptureEvents.failed(pending.context, "自拍换维确认超时或执行者失效");
+                }
             }
         }
         PORTAL_TRANSFER_LOCKS.replaceAll((uuid, ticks) -> ticks - 1);

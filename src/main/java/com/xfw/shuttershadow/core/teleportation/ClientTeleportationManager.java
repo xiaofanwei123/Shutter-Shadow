@@ -27,7 +27,7 @@ import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 public class ClientTeleportationManager {
     public static final Minecraft client = Minecraft.getInstance();
 
-    /** 目标不同先changePlayerDimension，随后设脚底位置、调整载具、更新本帧状态并要求一次原版地形setup。 */
+    /** 解除骑乘，只切换玩家世界与位置，并刷新本帧地形状态。 */
     public static void forceTeleportPlayer(ResourceKey<Level> toDimension, Vec3 destination) {
         
         ClientLevel fromWorld = client.level;
@@ -35,6 +35,7 @@ public class ClientTeleportationManager {
         ResourceKey<Level> fromDimension = fromWorld.dimension();
         LocalPlayer player = client.player;
         assert player != null;
+        player.unRide();
         if (fromDimension != toDimension) {
             ClientLevel toWorld = ClientWorldLoader.getWorld(toDimension);
             Vec3 eyeOffset = McHelper.getEyeOffset(player);
@@ -42,22 +43,18 @@ public class ClientTeleportationManager {
         }
         
         player.setPos(destination.x, destination.y, destination.z);
-        McHelper.adjustVehicle(player);
         
         
         RenderStates.updatePreRenderInfo(RenderStates.getPartialTick());
         MyGameRenderer.vanillaTerrainSetupOverride = 1;
     }
 
-    /** 取消骑乘，切网络handler world。 */
+    /** 复用玩家与已加载世界资源完成无缝换维。 */
     public static void changePlayerDimension(
         LocalPlayer player, ClientLevel fromWorld, ClientLevel toWorld, Vec3 newEyePos
     ) {
         Validate.isTrue(!WorldRenderInfo.isRendering());
         Validate.isTrue(!PacketRedirectionClient.getIsProcessingRedirectedMessage());
-        
-        Entity vehicle = player.getVehicle();
-        player.unRide();
         
         ResourceKey<Level> toDimension = toWorld.dimension();
         ResourceKey<Level> fromDimension = fromWorld.dimension();
@@ -92,38 +89,8 @@ public class ClientTeleportationManager {
         
         client.getBlockEntityRenderDispatcher().setLevel(toWorld);
         
-        if (vehicle != null) {
-            Vec3 offset = player.getVehicleAttachmentPoint(vehicle);
-            Vec3 vehiclePos = player.position().add(offset);
-            moveClientEntityAcrossDimension(
-                vehicle, toWorld,
-                vehiclePos
-            );
-            McHelper.setPosAndLastTickPos(
-                vehicle,
-                player.position().add(offset),
-                McHelper.lastTickPosOf(player).add(offset)
-            );
-            player.startRiding(vehicle, true);
-        }
-        
-        
         FogRendererContext.onPlayerTeleport(fromDimension, toDimension);
         
     }
 
-    /** 从旧ClientLevel移除普通客户端实体，换level/位置、清removed并加入目标，验证存活标记。 */
-    public static void moveClientEntityAcrossDimension(
-        Entity entity,
-        ClientLevel newWorld,
-        Vec3 newPos
-    ) {
-        ClientLevel oldWorld = (ClientLevel) entity.level();
-        oldWorld.removeEntity(entity.getId(), Entity.RemovalReason.CHANGED_DIMENSION);
-        ((IEEntity) entity).ip_setWorld(newWorld);
-        entity.setPos(newPos.x, newPos.y, newPos.z);
-        ((IEEntity) entity).ip_unsetRemoved();
-        newWorld.addEntity(entity);
-        Validate.isTrue(!entity.isRemoved());
-    }
 }

@@ -1,15 +1,12 @@
 package com.xfw.shuttershadow.camera;
 
 import com.xfw.shuttershadow.Shuttershadow;
-import com.xfw.shuttershadow.ShuttershadowConfig;
 import com.xfw.shuttershadow.item.MobDimensionFilmRollItem;
 
 import com.xfw.shuttershadow.network.RemoteStandPreparation;
-import com.xfw.shuttershadow.util.CaptureEntitySearchRange;
-import io.github.mortuusars.exposure.neoforge.api.event.FrameAddedEvent;
-import io.github.mortuusars.exposure.world.camera.frame.EntitiesInFrame;
+import com.xfw.shuttershadow.api.CameraCaptureContext;
+import io.github.mortuusars.exposure.world.camera.frame.Frame;
 import io.github.mortuusars.exposure.world.item.camera.Attachment;
-import io.github.mortuusars.exposure.world.item.camera.CameraItem;
 import io.github.mortuusars.exposure.world.level.storage.ExposureRepository;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -25,14 +22,14 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import com.xfw.shuttershadow.api.ChunkLoading;
-import com.xfw.shuttershadow.api.SeamlessTeleportation;
 import com.xfw.shuttershadow.api.ChunkLoader;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.List;
 
-/** 生物胶卷在FrameAdded时记录首个非玩家生物，在上传完成或曝光失效免上传完成时把生物从目标维度带到源维度。 */
+/** 按拍摄计划选择目标生物，上传或免成片完成后执行传送并释放保活区块。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class MobDimensionFilmCapture {
     private static final long UPLOAD_TIMEOUT_MILLIS = 120_000L;
@@ -40,7 +37,7 @@ public final class MobDimensionFilmCapture {
     private record PendingKey(UUID player, String exposureId) {
     }
 
-    private static final Map<PendingKey, Pending> PENDING = new HashMap<>();
+    private static final Map<PendingKey, List<Pending>> PENDING = new HashMap<>();
 
     /** 固定目标生物UUID及映射回源维度的位置。 */
     private static final class Pending {
@@ -49,16 +46,20 @@ public final class MobDimensionFilmCapture {
         private final ServerLevel target;
         private final UUID entityId;
         private final Vec3 destination;
+        private final ItemStack camera;
+        private final CameraCaptureContext context;
         private ChunkLoader loader;
         private long expiresAt = System.currentTimeMillis() + UPLOAD_TIMEOUT_MILLIS;
 
         /** 保存源/目标世界、实体UUID和反向映射目的地，注册半径0的全局保活loader。 */
-        private Pending(ServerPlayer photographer, RemoteCaptureContext remote, LivingEntity entity) {
+        private Pending(ServerPlayer photographer, RemoteCaptureContext remote, LivingEntity entity, ItemStack camera) {
             this.photographer = photographer;
-            source = (ServerLevel) remote.source().asHolderEntity().level();
+            this.camera = camera;
+            context = CameraCaptureEvents.context(camera);
+            source = CameraCaptureEvents.mobDestinationLevel(camera, (ServerLevel) remote.source().asHolderEntity().level());
             target = remote.level();
             entityId = entity.getUUID();
-            destination = remote.sourcePosition(entity.position());
+            destination = CameraCaptureEvents.mobDestination(camera, remote, entity);
             BlockPos block = entity.blockPosition();
             loader = new ChunkLoader(target.dimension(), block.getX() >> 4, block.getZ() >> 4, 0);
             // 只保活选中实体的区块，避免关取景器/结束截图后上传尚未完成就卸载实体。
@@ -67,7 +68,10 @@ public final class MobDimensionFilmCapture {
 
         /** 移除当前全局loader。 */
         private void release() {
-            ChunkLoading.removeGlobalChunkLoader(photographer.getServer(), loader);
+            if (loader != null) {
+                ChunkLoading.removeGlobalChunkLoader(photographer.getServer(), loader);
+                loader = null;
+            }
         }
 
         /** 按UUID在目标世界找到实体，跨区块时先注册新半径0 loader，再释放旧loader。 */
@@ -90,8 +94,8 @@ public final class MobDimensionFilmCapture {
                 Entity entity = target.getEntity(entityId);
                 if (!(entity instanceof LivingEntity living) || entity instanceof Player
                         || !living.isAlive() || living.isRemoved()) return;
-                Entity moved = SeamlessTeleportation.teleportEntity(entity, source, destination);
-                if (moved == null || moved.isRemoved() || moved.level() != source) {
+                Entity moved = CameraTransfers.teleportEntity(entity, source, destination, camera);
+                if (moved == null || moved.isRemoved()) {
                     Shuttershadow.LOGGER.warn("Creature film could not transfer entity {} from {} to {}.",
                             entityId, target.dimension().location(), source.dimension().location());
                 }
@@ -112,40 +116,35 @@ public final class MobDimensionFilmCapture {
         return Attachment.FILM.get(camera).getForReading().getItem() instanceof MobDimensionFilmRollItem;
     }
 
-    /** 读取远场照片事件中的首个非玩家实体。 */
-    @SubscribeEvent
-    public static void onFrameAdded(FrameAddedEvent event) {
-        if (!hasMobDimensionFilm(event.getCamera())) return;
-        RemoteCaptureContext remote;
-        LivingEntity entity;
-        if (event.getCameraHolder() instanceof RemoteCaptureContext observed) {
-            remote = observed;
-            entity = event.getEntitiesInFrame().stream()
-                    .filter(candidate -> !(candidate instanceof Player)).findFirst().orElse(null);
-        } else {
-            remote = RemoteStandPreparation.sourceTransferContext(event.getCameraHolder(), event.getCamera());
-            if (remote == null || !(event.getCamera().getItem() instanceof CameraItem item)) return;
-            entity = CaptureEntitySearchRange.withRadius(ShuttershadowConfig.mobCaptureRadius(),
-                    () -> EntitiesInFrame.get(remote, item.getPointOfView(remote, event.getCamera()),
-                            item.getViewfinderFov(remote.level(), event.getCamera()))).stream()
-                    .filter(candidate -> !(candidate instanceof Player)).findFirst().orElse(null);
-        }
-        ServerPlayer photographer = remote.getServerPlayerExecutingExposure().orElse(null);
-        if (entity == null || photographer == null) return;
-        String id = event.getFrame().identifier().id();
+    /** 根据固定拍摄执行者、计划和本模组对象选择事件建立生物事务。 */
+    public static void prepare(ItemStack camera, Frame frame) {
+        RemoteCaptureContext remote = CameraCaptureEvents.mobContext(camera);
+        if (remote == null) return;
+        ServerPlayer photographer = CameraCaptureEvents.context(camera).getExecutor();
+        List<LivingEntity> selected = CameraCaptureEvents.selectMobs(camera, remote);
+        if (selected.isEmpty()) return;
+        String id = frame.identifier().id();
         PendingKey key = new PendingKey(photographer.getUUID(), id);
-        Pending previous = PENDING.put(key, new Pending(photographer, remote, entity));
-        if (previous != null) previous.release();
+        List<Pending> prepared = new java.util.ArrayList<>();
+        try {
+            for (LivingEntity entity : selected) {
+                if (entity.level() == remote.level()) prepared.add(new Pending(photographer, remote, entity, camera));
+            }
+        } catch (RuntimeException exception) {
+            prepared.forEach(Pending::release); throw exception;
+        }
+        List<Pending> previous = PENDING.put(key, List.copyOf(prepared));
+        if (previous != null) previous.forEach(Pending::release);
     }
 
     /** 如果存在属于该摄影师的Pending，改写Exposure仓库上传完成回调。 */
     public static boolean expectUpload(ExposureRepository repository, ServerPlayer player, String id) {
         PendingKey key = new PendingKey(player.getUUID(), id);
-        Pending pending = PENDING.get(key);
-        if (pending == null || pending.photographer != player) return false;
+        List<Pending> pending = PENDING.get(key);
+        if (pending == null || pending.isEmpty() || pending.getFirst().photographer != player) return false;
         repository.expect(player, id, (uploadedPlayer, uploadedId) -> {
             PendingKey uploadedKey = new PendingKey(uploadedPlayer.getUUID(), uploadedId);
-            if (PENDING.remove(uploadedKey, pending)) pending.transfer();
+            if (PENDING.remove(uploadedKey, pending)) transfer(pending);
         });
         return true;
     }
@@ -153,18 +152,26 @@ public final class MobDimensionFilmCapture {
     /** 免曝光上传路径按摄影师和照片ID确认Pending后立即移除、传送。 */
     public static void completeWithoutUpload(ServerPlayer player, String id) {
         PendingKey key = new PendingKey(player.getUUID(), id);
-        Pending pending = PENDING.get(key);
-        if (pending != null && pending.photographer == player && PENDING.remove(key, pending)) {
-            pending.transfer();
+        List<Pending> pending = PENDING.get(key);
+        if (pending != null && !pending.isEmpty() && pending.getFirst().photographer == player && PENDING.remove(key, pending)) {
+            transfer(pending);
+        }
+    }
+
+    /** 各对象独立传送，使用原照片上下文而不是该相机后来拍摄的计划。 */
+    private static void transfer(List<Pending> pending) {
+        for (Pending candidate : pending) {
+            if (candidate.context == null) candidate.release();
+            else if (!CameraCaptureEvents.withContext(candidate.context, candidate::transfer)) candidate.release();
         }
     }
 
     /** 取消指定照片Pending并释放保活loader。 */
     public static void cancelPending(ServerPlayer player, String exposureId) {
         PendingKey key = new PendingKey(player.getUUID(), exposureId);
-        Pending pending = PENDING.get(key);
-        if (pending != null && pending.photographer == player && PENDING.remove(key, pending)) {
-            pending.release();
+        List<Pending> pending = PENDING.get(key);
+        if (pending != null && !pending.isEmpty() && pending.getFirst().photographer == player && PENDING.remove(key, pending)) {
+            pending.forEach(Pending::release);
         }
     }
 
@@ -173,16 +180,18 @@ public final class MobDimensionFilmCapture {
     public static void onServerTick(ServerTickEvent.Post event) {
         long now = System.currentTimeMillis();
         PENDING.entrySet().removeIf(entry -> {
-            Pending pending = entry.getValue();
+            List<Pending> candidates = entry.getValue();
+            if (candidates.isEmpty()) return true;
+            Pending pending = candidates.getFirst();
             // 支架照片尚未完成时保留候选，仅在截图结束后计上传清理时限。
             if (RemoteStandPreparation.ownsExposure(entry.getKey().exposureId())) {
-                pending.expiresAt = now + UPLOAD_TIMEOUT_MILLIS;
+                candidates.forEach(candidate -> candidate.expiresAt = now + UPLOAD_TIMEOUT_MILLIS);
             }
             if (now >= pending.expiresAt) {
-                pending.release();
+                candidates.forEach(Pending::release);
                 return true;
             }
-            pending.followEntity();
+            candidates.forEach(Pending::followEntity);
             return false;
         });
     }
@@ -191,8 +200,8 @@ public final class MobDimensionFilmCapture {
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         PENDING.values().removeIf(pending -> {
-            if (pending.photographer != event.getEntity()) return false;
-            pending.release();
+            if (pending.isEmpty() || pending.getFirst().photographer != event.getEntity()) return false;
+            pending.forEach(Pending::release);
             return true;
         });
     }
@@ -200,7 +209,7 @@ public final class MobDimensionFilmCapture {
     /** 停止服务端时释放全部loader并清空Pending。 */
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
-        PENDING.values().forEach(Pending::release);
+        PENDING.values().forEach(pending -> pending.forEach(Pending::release));
         PENDING.clear();
     }
 }

@@ -1,7 +1,6 @@
 package com.xfw.shuttershadow.mixin.minecraft.client;
 
 
-import com.xfw.shuttershadow.Shuttershadow;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -22,9 +21,10 @@ import com.xfw.shuttershadow.core.CoreSettings;
 import com.xfw.shuttershadow.access.IEClientPlayNetworkHandler;
 import com.xfw.shuttershadow.access.IEPlayerPositionLookS2CPacket;
 import com.xfw.shuttershadow.network.CoreNetworkHandshake;
+import com.xfw.shuttershadow.network.PacketRedirectionClient;
 import com.xfw.shuttershadow.core.teleportation.ClientTeleportationManager;
 
-/** 处理多世界位置、载具、实体、时钟和方块预测同步。 */
+/** 处理多世界位置、远景骑乘关系、时钟和方块预测同步。 */
 @Mixin(ClientPacketListener.class)
 public abstract class MixinClientPacketListener implements IEClientPlayNetworkHandler {
     @Shadow
@@ -77,7 +77,7 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
     
     private boolean isReProcessingPassengerPacket;
     
-    /** 载具实体尚未到达时，将乘客同步包延后重试一次。 */
+    /** 载具尚未到达时，保留原世界延后重试一次，并丢弃失效连接或世界的包。 */
     @Inject(
         method = "Lnet/minecraft/client/multiplayer/ClientPacketListener;handleSetEntityPassengersPacket(Lnet/minecraft/network/protocol/game/ClientboundSetPassengersPacket;)V",
         at = @At(
@@ -94,10 +94,24 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
         Entity entity_1 = this.level.getEntity(entityPassengersSetS2CPacket_1.getVehicle());
         if (entity_1 == null) {
             if (!isReProcessingPassengerPacket) {
+                ClientLevel packetWorld = this.level;
+                ClientPacketListener listener = (ClientPacketListener) (Object) this;
                 CoreSettings.CLIENT_TASK_LIST.addTask(() -> {
+                    Minecraft mc = Minecraft.getInstance();
+                    if (mc.player == null || mc.level == null || mc.getConnection() != listener) return true;
+                    if (packetWorld != mc.level && (!ClientWorldLoader.getIsInitialized()
+                            || !ClientWorldLoader.getClientWorlds().contains(packetWorld))) return true;
                     isReProcessingPassengerPacket = true;
-                    handleSetEntityPassengersPacket(entityPassengersSetS2CPacket_1);
-                    isReProcessingPassengerPacket = false;
+                    try {
+                        if (packetWorld == mc.level) {
+                            handleSetEntityPassengersPacket(entityPassengersSetS2CPacket_1);
+                        } else {
+                            PacketRedirectionClient.handleRedirectedPacket(packetWorld.dimension(),
+                                    entityPassengersSetS2CPacket_1, listener);
+                        }
+                    } finally {
+                        isReProcessingPassengerPacket = false;
+                    }
                     return true;
                 });
                 ci.cancel();
@@ -135,27 +149,5 @@ public abstract class MixinClientPacketListener implements IEClientPlayNetworkHa
             clientWorld.handleBlockChangedAck(seqNumber);
         }
     }
-    
-    /** 保留已有乘客的实体，避免重复生成包替换无缝传送的载具。 */
-    @Inject(
-        method = "handleAddEntity",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V",
-            shift = At.Shift.AFTER
-        ),
-        cancellable = true
-    )
-    private void onHandleAddEntity(ClientboundAddEntityPacket packet, CallbackInfo ci) {
-        int entityId = packet.getId();
-        
-        Entity existingEntity = level.getEntity(entityId);
-        
-        if (existingEntity != null && !existingEntity.getPassengers().isEmpty()) {
-            Shuttershadow.LOGGER.warn("[shuttershadow] Entity already exists and has passengers when accepting add-entity packet. Ignoring. {} {}", existingEntity, packet);
-            ci.cancel();
-        }
-    }
-    
     
 }
