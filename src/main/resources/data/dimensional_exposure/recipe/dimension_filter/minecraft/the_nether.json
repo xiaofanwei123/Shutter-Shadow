@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "ONO",
+    "OGO",
+    "OOO"
+  ],
+  "key": {
+    "G": { "item": "minecraft:glass_pane" },
+    "N": { "item": "minecraft:nether_star" },
+    "O": { "item": "minecraft:obsidian" }
+  },
+  "result": {
+    "id": "dimensional_exposure:dimension_filter",
+    "count": 1,
+    "components": {
+      "dimensional_exposure:dimension_filter_target": "minecraft:the_nether"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "replace": false,
   "values": [
-    "shuttershadow:dimension_filter"
+    "dimensional_exposure:dimension_filter"
   ]
 }

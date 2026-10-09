@@ -1,7 +1,7 @@
 {
   "values": [
-    "shuttershadow:exposure_failure",
-    "shuttershadow:narcissism",
-    "shuttershadow:safe_dimension_teleport"
+    "dimensional_exposure:exposure_failure",
+    "dimensional_exposure:narcissism",
+    "dimensional_exposure:safe_dimension_teleport"
   ]
 }

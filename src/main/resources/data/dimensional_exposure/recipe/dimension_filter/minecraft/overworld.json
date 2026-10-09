@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "OOO",
+    "OGO",
+    "OOO"
+  ],
+  "key": {
+    "G": { "item": "minecraft:glass_pane" },
+    "O": { "item": "minecraft:grass_block" }
+  },
+  "result": {
+    "id": "dimensional_exposure:dimension_filter",
+    "count": 1,
+    "components": {
+      "dimensional_exposure:dimension_filter_target": "minecraft:overworld"
+    }
+  }
+}

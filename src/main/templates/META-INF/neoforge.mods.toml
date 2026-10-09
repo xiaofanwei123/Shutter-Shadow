@@ -13,7 +13,7 @@ description = '''${mod_description}'''
 config = "${mod_id}.mixins.json"
 
 [[mixins]]
-config = "shuttershadow.compat.mixins.json"
+config = "${mod_id}.compat.mixins.json"
 
 [[accessTransformers]]
 file = "META-INF/accesstransformer.cfg"
@@ -34,7 +34,7 @@ side = "BOTH"
 [[dependencies."${mod_id}"]]
 modId = "exposure"
 type = "required"
-reason = "Shuttershadow's camera and viewfinder integration is verified with Exposure 1.9.19."
+reason = "Dimensional Exposure's camera and viewfinder integration is verified with Exposure 1.9.19."
 versionRange = "[1.9.19]"
 ordering = "AFTER"
 side = "BOTH"
@@ -42,7 +42,7 @@ side = "BOTH"
 [[dependencies."${mod_id}"]]
 modId = "sodium"
 type = "optional"
-reason = "Shuttershadow's optional Sodium integration requires Sodium 0.8.13 or newer."
+reason = "Dimensional Exposure's optional Sodium integration requires Sodium 0.8.13 or newer."
 versionRange = "[0.8.13,)"
 ordering = "AFTER"
 side = "CLIENT"
@@ -50,7 +50,7 @@ side = "CLIENT"
 [[dependencies."${mod_id}"]]
 modId = "iris"
 type = "optional"
-reason = "Shuttershadow's optional Iris integration requires Iris 1.8.14 Beta 1 or newer."
+reason = "Dimensional Exposure's optional Iris integration requires Iris 1.8.14 Beta 1 or newer."
 versionRange = "[1.8.14-beta.1,)"
 ordering = "AFTER"
 side = "CLIENT"
@@ -58,7 +58,7 @@ side = "CLIENT"
 [[dependencies."${mod_id}"]]
 modId = "immersive_portals_core"
 type = "incompatible"
-reason = "Shutter shadow includes its own dimension runtime and cannot be installed together with Immersive Portals. Remove Immersive Portals or Shutter shadow. "
+reason = "Dimensional Exposure includes its own dimension runtime and cannot be installed together with Immersive Portals. Remove Immersive Portals or Dimensional Exposure. "
 versionRange = "[0,)"
 ordering = "NONE"
 side = "BOTH"

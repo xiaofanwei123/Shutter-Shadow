@@ -1,6 +1,0 @@
-{
-  "parent": "minecraft:item/generated",
-  "textures": {
-    "layer0": "shuttershadow:item/dimension_filter/minecraft/overworld"
-  }
-}

@@ -1,7 +1,7 @@
 {
   "entries": [
-    "shuttershadow:nether_camera_books",
-    "shuttershadow:end_camera_books"
+    "dimensional_exposure:nether_camera_books",
+    "dimensional_exposure:end_camera_books"
   ],
   "replace": false
 }
