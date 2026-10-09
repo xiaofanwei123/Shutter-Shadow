@@ -11,6 +11,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.RenderBuffers;
+import net.minecraft.client.renderer.SectionOcclusionGraph;
 import net.minecraft.client.renderer.ViewArea;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.client.renderer.culling.Frustum;
@@ -49,6 +50,10 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     
     @Shadow
     private ViewArea viewArea;
+
+    @Shadow
+    @Final
+    private SectionOcclusionGraph sectionOcclusionGraph;
     
     @Shadow
     private PostChain transparencyChain;
@@ -105,6 +110,13 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
         Camera camera, Frustum frustum, boolean hasForcedFrustum, boolean spectator,
         CallbackInfo ci
     ) {
+        // 无缝换维复用后台渲染器，首次主视角绘制前补齐普通网格并重置遮挡图。
+        if (!WorldRenderInfo.isRendering() && viewArea instanceof RemoteViewArea remoteViewArea) {
+            LocalPlayer player = Minecraft.getInstance().player;
+            if (player != null && remoteViewArea.preparePlayerView(player.getX(), player.getZ())) {
+                sectionOcclusionGraph.waitAndReset(viewArea);
+            }
+        }
         if (WorldRenderInfo.isRendering()) {
             if (level.dimension() != RenderStates.originalPlayerDimension) {
                 sectionRenderDispatcher.setCamera(camera.getPosition());
@@ -286,6 +298,13 @@ public abstract class MixinLevelRenderer implements IEWorldRenderer {
     @Override
     public ViewArea ip_getBuiltChunkStorage() {
         return viewArea;
+    }
+
+    /** 等待旧遮挡任务结束并断开可见区段引用，保留后台区段及其缓冲。 */
+    @Override
+    public void ip_resetTerrain() {
+        sectionOcclusionGraph.waitAndReset(viewArea);
+        visibleSections.clear();
     }
     
     /** 读取 transparencyChain，保存对应世界的透明后处理链。 */

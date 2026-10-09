@@ -37,11 +37,6 @@ public class RenderStates {
         
     }
     
-    /** 目标渲染为0禁止视角摇晃，正常为1。 */
-    public static double getViewBobbingOffsetMultiplier() {
-        return WorldRenderInfo.isRendering() ? 0 : 1;
-    }
-    
     /** 每帧结束后恢复真实玩家世界的光照纹理。 */
     public static void onTotalRenderEnd() {
         Minecraft client = Minecraft.getInstance();

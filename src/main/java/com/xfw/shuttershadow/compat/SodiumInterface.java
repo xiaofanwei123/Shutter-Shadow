@@ -21,8 +21,8 @@ public class SodiumInterface {
             return false;
         }
         
-        /** 返回null，不创建Sodium上下文。 */
-        public Object createNewContext(int renderDistance) {
+        /** 返回null，不取得Sodium上下文。 */
+        public Object acquireContext(int renderDistance) {
             return null;
         }
         
@@ -52,10 +52,13 @@ public class SodiumInterface {
             return true;
         }
         
-        /** 按相机有效视距创建空渲染上下文。 */
+        /** 按当前管理器和相机有效视距取得可复用的渲染上下文。 */
         @Override
-        public Object createNewContext(int renderDistance) {
-            return new SodiumRenderingContext(renderDistance);
+        public Object acquireContext(int renderDistance) {
+            SodiumWorldRenderer swr =
+                ((LevelRendererExtension) Minecraft.getInstance().levelRenderer).sodium$getWorldRenderer();
+            RenderSectionManager manager = ((IESodiumWorldRenderer) swr).ip_getRenderSectionManager();
+            return ((IESodiumRenderSectionManager) manager).ip_acquireCameraContext(renderDistance);
         }
         
         /** 将相机的 Sodium 渲染上下文切换到当前世界渲染器。 */
@@ -69,6 +72,7 @@ public class SodiumInterface {
             SodiumRenderingContext renderingContext = (SodiumRenderingContext) context;
             // 光影首次创建或资源重载可能替换 manager；旧列表所属 GPU 区域已被释放。
             if (renderingContext.owner != null && renderingContext.owner != renderSectionManager) {
+                renderingContext.active = false;
                 swr.scheduleTerrainUpdate();
                 return;
             }
@@ -76,7 +80,9 @@ public class SodiumInterface {
             
             ((IESodiumRenderSectionManager) renderSectionManager)
                 .ip_swapContext(renderingContext);
+            renderingContext.active = !renderingContext.active;
             
+            // 可见区段世代及 Iris 阴影状态仍由管理器共享，切换后继续重新判定地形。
             swr.scheduleTerrainUpdate();
         }
         

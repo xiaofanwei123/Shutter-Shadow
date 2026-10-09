@@ -38,9 +38,11 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /** 固定每次拍摄计划并连接事件、异步截图、上传与传送结果。 */
@@ -48,6 +50,8 @@ import java.util.UUID;
 public final class CameraCaptureEvents {
     private static final Map<ItemStack, Shot> SHOTS = new IdentityHashMap<>();
     private static final Map<UUID, Shot> ALL = new java.util.HashMap<>();
+    private static final Map<ServerPlayer, Map<String, Shot>> IMAGE_SHOTS = new IdentityHashMap<>();
+    private static final Map<ServerPlayer, Map<Long, Shot>> CAPTURE_SHOTS = new IdentityHashMap<>();
     private static final ThreadLocal<Shot> EXECUTING = new ThreadLocal<>();
     /** 一次拍摄跨多个调用保持同一计划，收尾后才从索引移除。 */
     private static final class Shot {
@@ -176,6 +180,25 @@ public final class CameraCaptureEvents {
         Shot executing = EXECUTING.get();
         return executing != null && executing.camera == camera ? executing : SHOTS.get(camera);
     }
+    /** 更新图片回执索引，编号变化时只撤销属于原拍摄的旧记录。 */
+    private static void setExposureId(Shot shot, @Nullable String id) {
+        if (ALL.get(shot.context.getShotId()) != shot || Objects.equals(shot.exposureId, id)) return;
+        removeIndex(IMAGE_SHOTS, shot.exposureId, shot);
+        shot.exposureId = id;
+        if (id != null) IMAGE_SHOTS.computeIfAbsent(shot.context.getExecutor(), ignored -> new HashMap<>()).put(id, shot);
+    }
+    /** 按玩家真实实例和回执编号定位拍摄，重连后的同 UUID 玩家不能命中旧事务。 */
+    private static <K> @Nullable Shot findIndexed(Map<ServerPlayer, Map<K, Shot>> index, ServerPlayer player, K key) {
+        Map<K, Shot> shots = index.get(player);
+        return shots == null ? null : shots.get(key);
+    }
+    /** 条件移除索引，空玩家记录随即释放，不影响重入后建立的新拍摄。 */
+    private static <K> void removeIndex(Map<ServerPlayer, Map<K, Shot>> index, @Nullable K key, Shot shot) {
+        if (key == null) return;
+        ServerPlayer player = shot.context.getExecutor();
+        Map<K, Shot> shots = index.get(player);
+        if (shots != null && shots.remove(key, shot) && shots.isEmpty()) index.remove(player, shots);
+    }
     /** 创建独立的照片世界上下文，先换维自拍留在真实玩家世界拍摄。 */
     public static @Nullable RemoteCaptureContext photoContext(CameraHolder holder, ItemStack camera) {
         Shot shot = shot(camera);
@@ -216,7 +239,7 @@ public final class CameraCaptureEvents {
     public static CaptureParameters parameters(CameraHolder holder, ServerPlayer player, ItemStack camera, CaptureParameters parameters) {
         Shot shot = SHOTS.get(camera);
         if (shot == null) return parameters;
-        shot.exposureId = parameters.exposureId();
+        setExposureId(shot, parameters.exposureId());
         RemoteSceneStartS2C scene = null;
         boolean custom = shot.plan.isPhotoSceneChanged()
                 || !holder.asHolderEntity().level().dimension().location().equals(shot.plan.getPhotoDimension())
@@ -227,7 +250,15 @@ public final class CameraCaptureEvents {
                 && parameters.projection().isEmpty()) {
             RemoteCaptureContext remote = photoContext(holder, camera);
             if (remote != null) {
-                if (shot.customScene == null) shot.customScene = RemoteCameraSession.openCapture(player, remote);
+                if (shot.customScene == null) {
+                    shot.customScene = RemoteCameraSession.openCapture(player, remote);
+                    if (ALL.get(shot.context.getShotId()) != shot) {
+                        RemoteCameraSession.close(player, shot.customScene.sequence());
+                        return parameters;
+                    }
+                    CAPTURE_SHOTS.computeIfAbsent(shot.context.getExecutor(), ignored -> new HashMap<>())
+                            .put(shot.customScene.sequence(), shot);
+                }
                 RemoteCameraSession.flushCapture(player);
                 scene = shot.customScene;
             }
@@ -288,14 +319,14 @@ public final class CameraCaptureEvents {
     private static List<LivingEntity> select(Shot shot, CameraSubjectsEvent.Purpose purpose,
             List<? extends LivingEntity> candidates, List<? extends LivingEntity> defaults) {
         CameraSubjectsEvent event = NeoForge.EVENT_BUS.post(new CameraSubjectsEvent(shot.context, purpose, candidates, defaults));
-        return event.getSubjects().stream().filter(candidates::contains)
-                .filter(entity -> entity.isAlive() && !entity.isRemoved()).distinct().toList();
+        return event.getSubjects().stream()
+                .filter(entity -> entity.isAlive() && !entity.isRemoved()).toList();
     }
     /** 在整帧生成后发布我们的修改事件，随后准备生物上传事务。 */
     public static Frame frame(ItemStack camera, Frame frame) {
         Shot shot = SHOTS.get(camera);
         if (shot == null) return frame;
-        shot.exposureId = frame.identifier().id();
+        setExposureId(shot, frame.identifier().id());
         CameraFrameEvent event = NeoForge.EVENT_BUS.post(new CameraFrameEvent(shot.context, frame));
         Frame result = event.getFrame();
         if (shot.plan.isMobTransfer()) MobDimensionFilmCapture.prepare(camera, result);
@@ -347,26 +378,21 @@ public final class CameraCaptureEvents {
     }
     /** 只接受本次摄影师与图片编号对应的服务端上传成功节点。 */
     public static void uploaded(ServerPlayer player, String id) {
-        for (Shot shot : List.copyOf(ALL.values())) {
-            if (shot.context.getExecutor() == player && id.equals(shot.exposureId)) {
-                shot.uploaded = true; completeIfReady(shot);
-            }
+        Shot shot = findIndexed(IMAGE_SHOTS, player, id);
+        if (shot != null) {
+            shot.uploaded = true; completeIfReady(shot);
         }
     }
     /** 自定义手持后台截图失败时按服务端保存的所有者和序号终结。 */
     public static void captureFinished(ServerPlayer player, long sequence, boolean captured) {
         if (captured) return;
-        for (Shot shot : List.copyOf(ALL.values())) {
-            if (shot.context.getExecutor() == player && shot.customScene != null
-                    && shot.customScene.sequence() == sequence) finish(shot, CameraCaptureEvent.Result.FAILED, "自定义场景截图失败");
-        }
+        Shot shot = findIndexed(CAPTURE_SHOTS, player, sequence);
+        if (shot != null) finish(shot, CameraCaptureEvent.Result.FAILED, "自定义场景截图失败");
     }
     /** 按服务端保存的执行者和编号接受客户端图片失败，不能终结别人的拍摄。 */
     public static void imageFailed(ServerPlayer player, String id) {
-        for (Shot shot : List.copyOf(ALL.values())) {
-            if (shot.context.getExecutor() == player && id.equals(shot.exposureId))
-                finish(shot, CameraCaptureEvent.Result.FAILED, "客户端图片生成或处理失败");
-        }
+        Shot shot = findIndexed(IMAGE_SHOTS, player, id);
+        if (shot != null) finish(shot, CameraCaptureEvent.Result.FAILED, "客户端图片生成或处理失败");
     }
     /** 记录传送主体，仅报告真实成功结果。 */
     public static void recordTransfer(ItemStack camera, Entity original, Entity moved) {
@@ -390,6 +416,11 @@ public final class CameraCaptureEvents {
     private static void finish(Shot shot, CameraCaptureEvent.Result result, String reason) {
         if (!ALL.remove(shot.context.getShotId(), shot)) return;
         SHOTS.remove(shot.camera, shot);
+        removeIndex(IMAGE_SHOTS, shot.exposureId, shot);
+        if (shot.customScene != null) removeIndex(CAPTURE_SHOTS, shot.customScene.sequence(), shot);
+        if (result == CameraCaptureEvent.Result.FAILED && !shot.transferred.isEmpty()) {
+            reason = "已完成传送，后续拍摄处理失败：" + reason;
+        }
         if (result == CameraCaptureEvent.Result.FAILED || result == CameraCaptureEvent.Result.CANCELED) {
             RemoteStandPreparation.cancelCapture(shot.context, shot.camera);
             if (shot.exposureId != null) {

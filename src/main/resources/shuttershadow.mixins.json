@@ -6,6 +6,7 @@
   "mixins": [
     "exposure.DimensionFilterDataMixin",
     "exposure.CameraItemRemoteCaptureMixin",
+    "exposure.ExposureFrameEventsMixin",
     "exposure.EntitiesInFrameCaptureRangeMixin",
     "exposure.ShutterRemoteCompletionMixin",
     "exposure.CameraStandPlayerFallbackMixin",

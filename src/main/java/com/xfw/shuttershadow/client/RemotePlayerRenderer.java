@@ -1,7 +1,6 @@
 package com.xfw.shuttershadow.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.AbstractClientPlayer;
@@ -22,16 +21,14 @@ public final class RemotePlayerRenderer {
     private RemotePlayerRenderer() {}
 
     /** 仅在WorldRenderInfo目标渲染中取得投影玩家，逐个绘制。 */
-    public static void render(LevelRenderer levelRenderer, Camera camera,
-                               DeltaTracker deltaTracker, PoseStack poseStack,
+    public static void render(LevelRenderer levelRenderer, DeltaTracker deltaTracker, PoseStack poseStack,
                                MultiBufferSource bufferSource) {
         if (!WorldRenderInfo.isRendering()) return;
         float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
         WorldRenderInfo renderInfo = WorldRenderInfo.getTopRenderInfo();
-        if (renderInfo == null || renderInfo.world == null) return;
         IEWorldRenderer remoteRenderer = (IEWorldRenderer) (Object) levelRenderer;
         for (ImmersiveCameraClient.PlayerProjection projection :
-                ImmersiveCameraClient.playerProjections(renderInfo.world, camera, partialTick)) {
+                ImmersiveCameraClient.playerProjections(renderInfo.world, partialTick)) {
             renderProjection(projection, remoteRenderer, partialTick, poseStack, bufferSource);
         }
     }

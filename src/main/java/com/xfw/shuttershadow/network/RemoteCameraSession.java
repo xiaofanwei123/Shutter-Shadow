@@ -325,9 +325,18 @@ public final class RemoteCameraSession {
         }
     }
 
-    /** 真实移动包排入连接之后才发RemoteSceneStop，避免支架视角在旧世界短暂恢复。 */
-    public static void finishDimensionTeleport(ServerPlayer player) {
-        PacketDistributor.sendToPlayer(player, new RemoteSceneStopS2C());
+    /** 移动成功后只结束原观察会话，停止包不覆盖完成事件新建的取景。 */
+    public static void finishDimensionTeleport(ServerPlayer player, RemoteCameraSession previous) {
+        try {
+            if (previous != null && previous.owner == player && ACTIVE.get(player.getUUID()) == previous) {
+                close(player, CameraViewEvent.CloseReason.DIMENSION_CHANGED);
+            }
+        } finally {
+            if (previous != null || !ACTIVE.containsKey(player.getUUID())) {
+                PacketDistributor.sendToPlayer(player,
+                        new RemoteSceneStopS2C(previous == null ? 0L : previous.sequence));
+            }
+        }
     }
 
     /** 移除目标与源玩家同步loader并置null。 */

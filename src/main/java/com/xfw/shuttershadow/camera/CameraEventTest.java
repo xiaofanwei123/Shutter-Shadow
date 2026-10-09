@@ -24,7 +24,7 @@ import java.util.UUID;
 /** 在游戏聊天栏显示相机事件的实际顺序，仅输出测试消息，不修改拍摄和传送。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID)
 public final class CameraEventTest {
-    public static final boolean ENABLED = true;
+    public static final boolean ENABLED = false;
     private static final Map<UUID, Integer> SERVER_VIEW_TICKS = new HashMap<>();
 
     /** 禁止创建测试监听器实例，事件由 NeoForge 自动注册。 */
@@ -54,6 +54,7 @@ public final class CameraEventTest {
     /** 显示拍摄前的最终计划，取消时也通知。 */
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public static void onBeforeCapture(CameraCaptureEvent.Before event) {
+        if (!ENABLED) return;
         send(event.getContext().getExecutor(), shot(event.getContext()) + "拍摄前："
                 + (event.isCanceled() ? "已取消" : "已受理") + "，成片=" + event.getPlan().getPhotoOutput()
                 + "，照片维度=" + event.getPlan().getPhotoDimension()
@@ -64,6 +65,7 @@ public final class CameraEventTest {
     /** 显示照片对象、玩家传送对象和生物传送对象的选择结果。 */
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onSubjects(CameraSubjectsEvent event) {
+        if (!ENABLED) return;
         String purpose = switch (event.getPurpose()) {
             case PHOTO -> "照片对象";
             case PLAYER_TRANSFER -> "玩家传送对象";
@@ -76,6 +78,7 @@ public final class CameraEventTest {
     /** 显示帧数据生成阶段，曝光失效仍能看到此事件。 */
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onFrame(CameraFrameEvent event) {
+        if (!ENABLED) return;
         send(event.getContext().getExecutor(), shot(event.getContext()) + "帧数据已生成："
                 + event.getFrame().identifier().id());
     }
@@ -83,6 +86,7 @@ public final class CameraEventTest {
     /** 显示每个传送主体的目的地和取消状态。 */
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public static void onBeforeTransfer(CameraTransferEvent.Before event) {
+        if (!ENABLED) return;
         ServerPlayer player = recipient(event);
         if (player != null) send(player, "传送前：" + event.getEntity().getName().getString()
                 + " → " + event.getTargetLevel().dimension().location()
@@ -92,6 +96,7 @@ public final class CameraEventTest {
     /** 显示真实传送结果，取消和失败也通知。 */
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onAfterTransfer(CameraTransferEvent.After event) {
+        if (!ENABLED) return;
         ServerPlayer player = recipient(event);
         if (player != null) send(player, "传送后：" + event.getEntity().getName().getString()
                 + "，结果=" + event.getResult());
@@ -100,6 +105,7 @@ public final class CameraEventTest {
     /** 显示整次拍摄终态及实际收图、写卷和成功传送数量。 */
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onCompleted(CameraCaptureEvent.Completed event) {
+        if (!ENABLED) return;
         String result = switch (event.getResult()) {
             case IMAGE_RECEIVED -> "已完成";
             case NO_IMAGE -> "已完成（免成片）";
@@ -191,13 +197,15 @@ public final class CameraEventTest {
         /** 显示原始图片就绪，免成片不会产生此消息。 */
         @SubscribeEvent(priority = EventPriority.LOWEST)
         public static void onImage(CameraImageEvent.Ready event) {
+            if (!ENABLED) return;
             send("图片已生成（颜色处理前）：" + event.getExposureId());
         }
 
         /** 向本地玩家聊天栏输出，不广播到其他玩家。 */
         private static void send(String text) {
+            if (!ENABLED) return;
             var player = Minecraft.getInstance().player;
-            if (ENABLED && player != null) {
+            if (player != null) {
                 player.displayClientMessage(Component.literal("[相机事件测试·客户端] " + text), false);
             }
         }

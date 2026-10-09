@@ -12,7 +12,6 @@ import com.xfw.shuttershadow.network.RemoteStandPreparation;
 import com.xfw.shuttershadow.camera.RemoteCaptureContext;
 import com.xfw.shuttershadow.camera.PhotoTargetContext;
 import com.xfw.shuttershadow.util.CaptureEntitySearchRange;
-import io.github.mortuusars.exposure.util.ExtraData;
 import io.github.mortuusars.exposure.world.camera.frame.Frame;
 import io.github.mortuusars.exposure.world.camera.capture.CaptureParameters;
 import io.github.mortuusars.exposure.world.camera.capture.Projection;
@@ -87,28 +86,6 @@ public abstract class CameraItemRemoteCaptureMixin implements DimensionFilmCaptu
             original.call(item, camera, frame);
             CameraCaptureEvents.filmWritten(camera);
         }
-    }
-
-    /** 实体元数据由本模组事件维护，停止派发 Exposure 原生修改事件。 */
-    @WrapOperation(method = "lambda$createFrame$18", at = @At(value = "INVOKE", target =
-            "Lio/github/mortuusars/exposure/PlatformHelper;postModifyEntityInFrameExtraDataEvent(Lio/github/mortuusars/exposure/world/entity/CameraHolder;Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/LivingEntity;Lio/github/mortuusars/exposure/util/ExtraData;)V"))
-    private static void shuttershadow$replaceEntityMetadataEvent(CameraHolder holder, ItemStack camera,
-            LivingEntity entity, ExtraData data, Operation<Void> original) {
-    }
-
-    /** 保留原生照片元数据生成，仅停止派发 Exposure 原生修改事件。 */
-    @WrapOperation(method = "addFrameExtraData", at = @At(value = "INVOKE", target =
-            "Lio/github/mortuusars/exposure/PlatformHelper;postModifyFrameExtraDataEvent(Lio/github/mortuusars/exposure/world/entity/CameraHolder;Lnet/minecraft/world/item/ItemStack;Lio/github/mortuusars/exposure/world/camera/capture/CaptureParameters;Ljava/util/List;Ljava/util/List;Lio/github/mortuusars/exposure/util/ExtraData;)V"))
-    private void shuttershadow$replaceFrameMetadataEvent(CameraHolder holder, ItemStack camera,
-            CaptureParameters parameters, List<BlockPos> positions, List<LivingEntity> entities,
-            ExtraData data, Operation<Void> original) {
-    }
-
-    /** 保留帧历史、统计、进度和实体行为，仅停止 Exposure 原生帧完成事件。 */
-    @WrapOperation(method = "onFrameAdded", at = @At(value = "INVOKE", target =
-            "Lio/github/mortuusars/exposure/PlatformHelper;postFrameAddedEvent(Lio/github/mortuusars/exposure/world/entity/CameraHolder;Lnet/minecraft/world/item/ItemStack;Lio/github/mortuusars/exposure/world/camera/frame/Frame;Ljava/util/List;Ljava/util/List;)V"))
-    private void shuttershadow$replaceFrameAddedEvent(CameraHolder holder, ItemStack camera,
-            Frame frame, List<BlockPos> positions, List<LivingEntity> entities, Operation<Void> original) {
     }
 
     /** 按服务端半径查询远景生物，并从红石照片中移除玩家。 */

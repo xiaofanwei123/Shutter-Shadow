@@ -17,6 +17,7 @@ public final class ShuttershadowConfig {
     public static final ModConfigSpec.BooleanValue SERVER_SIDE_NORMAL_CHUNK_LOADING;
     public static final ModConfigSpec.BooleanValue ENABLE_REMOTE_CHUNK_LOADING;
     public static final ModConfigSpec.IntValue DELAY_UNLOAD_GENERATIONS;
+    public static final ModConfigSpec.IntValue MAX_CACHED_VIEW_PRESETS;
 
     static {
         ModConfigSpec.Builder serverBuilder = new ModConfigSpec.Builder();
@@ -49,9 +50,10 @@ public final class ShuttershadowConfig {
         serverBuilder.translation("shuttershadow.configuration.core").push("core");
         SERVER_SIDE_NORMAL_CHUNK_LOADING = defineCoreBoolean(serverBuilder, "serverSideNormalChunkLoading", true,
                 "选择相机额外区块票据的活跃等级：开启时可更新实体与方块，关闭时仅要求方块更新。",
-                "更改前请退出世界，更改后重新进入，使新票据统一使用新等级。");
+                "运行中更改后自动释放旧等级票据，并按新等级重新加载当前相机范围。");
         ENABLE_REMOTE_CHUNK_LOADING = defineCoreBoolean(serverBuilder, "enableRemoteChunkLoading", true,
-                "是否为相机额外订阅的目标维度区块添加加载票据，不影响原版玩家区块加载。");
+                "是否为相机额外订阅的目标维度区块添加加载票据，不影响原版玩家区块加载。",
+                "运行中关闭会释放相机票据，重新开启后自动重新加载仍在观察的范围。");
         DELAY_UNLOAD_GENERATIONS = serverBuilder
                 .comment("相机停止观察区块后，保留额外区块订阅的更新代数，默认 4，范围 1-120。不建议修改。",
                         "单位是订阅更新代数，不是游戏刻或区块；每代约 13 游戏刻，实际清理发生在超过设定代数后。",
@@ -70,6 +72,12 @@ public final class ShuttershadowConfig {
                 .define("accept_stand_dimension_film_teleport", true);
         clientBuilder.pop();
         clientBuilder.translation("shuttershadow.configuration.core").push("core");
+        MAX_CACHED_VIEW_PRESETS = clientBuilder
+                .comment("原版渲染器每个维度最多保留的完整视区索引数量，默认 3，范围 1-16，包含当前视区。",
+                        "较小值减少索引缓存内存，较大值便于快速折返时复用索引；已有区段和缓冲继续独立复用。",
+                        "运行中修改自动生效。使用 Sodium 时地形由其自行管理，此项影响很小。")
+                .translation("shuttershadow.configuration.core.maxCachedViewPresets")
+                .defineInRange("maxCachedViewPresets", 3, 1, 16);
         ENABLE_CLIENT_PERFORMANCE_ADJUSTMENT = defineCoreBoolean(clientBuilder, "enableClientPerformanceAdjustment", true,
                 "客户端卡顿时缩短原版地形渲染的目标维度绘制距离，不修改普通世界视距。");
         DO_CHECK_GL_ERROR = defineCoreBoolean(clientBuilder, "doCheckGlError", false,
@@ -116,5 +124,10 @@ public final class ShuttershadowConfig {
     /** 读取服务端停止观察后的区块订阅保留代数。 */
     public static int delayUnloadGenerations() {
         return DELAY_UNLOAD_GENERATIONS.get();
+    }
+
+    /** 读取客户端每个渲染器保留的完整视区索引上限。 */
+    public static int maxCachedViewPresets() {
+        return MAX_CACHED_VIEW_PRESETS.get();
     }
 }

@@ -130,7 +130,7 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
         }
     }
     
-    /** 远景统一缩放摇晃平移，普通视角原样调用并保留其他模组的包装。 */
+    /** 远景摇晃平移归零，普通视角原样调用并保留旋转和其他模组的包装。 */
     @WrapOperation(
         method = "bobView",
         at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/vertex/PoseStack;translate(FFF)V")
@@ -141,8 +141,7 @@ public abstract class MixinGameRenderer implements IEGameRenderer {
             original.call(poses, x, y, z);
             return;
         }
-        double multiplier = RenderStates.getViewBobbingOffsetMultiplier();
-        original.call(poses, (float) (x * multiplier), (float) (y * multiplier), (float) (z * multiplier));
+        original.call(poses, 0.0F, 0.0F, 0.0F);
     }
 
 

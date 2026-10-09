@@ -12,6 +12,7 @@ import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import com.xfw.shuttershadow.compat.IESodiumRenderSectionManager;
 import com.xfw.shuttershadow.compat.SodiumRenderingContext;
 
@@ -33,6 +34,22 @@ public class MixinSodiumRenderSectionManager implements IESodiumRenderSectionMan
     @Shadow private SectionCollector sectionCollector;
     @Shadow private SectionCollector lastSectionCollector;
     @Shadow private Map<TaskQueueType, ArrayDeque<RenderSection>> taskLists;
+
+    // 跟随管理器释放，避免全局缓存留住旧世界或已释放的 GPU 区域。
+    @Unique private SodiumRenderingContext shuttershadow$cameraContext;
+
+    /** 复用停用的相机上下文，视距变化时替换，重入时保持原上下文独立。 */
+    @Override
+    public SodiumRenderingContext ip_acquireCameraContext(int renderDistance) {
+        if (shuttershadow$cameraContext != null && shuttershadow$cameraContext.active) {
+            return new SodiumRenderingContext(renderDistance);
+        }
+        if (shuttershadow$cameraContext == null
+            || shuttershadow$cameraContext.renderDistance != renderDistance) {
+            shuttershadow$cameraContext = new SodiumRenderingContext(renderDistance);
+        }
+        return shuttershadow$cameraContext;
+    }
     
     /** 校验并交换视距、可见区段、收集器及任务队列。 */
     @Override

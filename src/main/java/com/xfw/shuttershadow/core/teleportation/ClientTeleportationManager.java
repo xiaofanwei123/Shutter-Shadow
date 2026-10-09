@@ -21,6 +21,7 @@ import com.xfw.shuttershadow.network.PacketRedirectionClient;
 import com.xfw.shuttershadow.core.render.MyGameRenderer;
 import com.xfw.shuttershadow.core.render.FogRendererContext;
 import com.xfw.shuttershadow.core.render.RenderStates;
+import com.xfw.shuttershadow.core.render.RemoteViewArea;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
 /** 客户端真实无缝换维度，复用已观察的ClientLevel/renderer与原LocalPlayer，避免传统respawn加载屏。 */
@@ -81,6 +82,7 @@ public class ClientTeleportationManager {
         ((IEMinecraftClient) client).ip_setWorldRenderer(
             ClientWorldLoader.getWorldRenderer(toDimension)
         );
+        RemoteViewArea.onPlayerDimensionChanged();
         
         if (client.particleEngine != null) {
             // 切换世界时保留已有粒子。

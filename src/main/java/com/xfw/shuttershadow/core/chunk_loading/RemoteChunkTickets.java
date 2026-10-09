@@ -7,14 +7,10 @@ import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongPredicate;
 import net.minecraft.server.level.ChunkHolder;
-import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ChunkResult;
-import net.minecraft.server.level.ChunkTaskPriorityQueue;
-import net.minecraft.server.level.ChunkTaskPriorityQueueSorter;
 import net.minecraft.server.level.DistanceManager;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
-import net.minecraft.util.thread.ProcessorMailbox;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.common.NeoForge;
@@ -28,7 +24,6 @@ import com.xfw.shuttershadow.util.Helper;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.WeakHashMap;
-import java.util.concurrent.Executor;
 
 /** 每个ServerLevel的远区块票据和按距离加载节流队列。 */
 @SuppressWarnings("JavadocReference")
@@ -48,6 +43,7 @@ public class RemoteChunkTickets {
     public static class ChunkTicketInfo {
         public int lastUpdateGeneration;
         public int distanceToSource;
+        private int ticketRadius;
         
         /** 保存代数和距离。 */
         public ChunkTicketInfo(int lastUpdateGeneration, int distanceToSource) {
@@ -63,12 +59,15 @@ public class RemoteChunkTickets {
     private final LongOpenHashSet waitingForLoading = new LongOpenHashSet();
     
     private boolean isValid = true;
+    private boolean loadingEnabled;
+    private int loadingRadius;
     
     public final int throttlingLimit = 4;
     
     /** 私有构造器，由get按世界创建。 */
     private RemoteChunkTickets() {
-    
+        loadingEnabled = ShuttershadowConfig.ENABLE_REMOTE_CHUNK_LOADING.get();
+        loadingRadius = getLoadingRadius();
     }
     
     // 使用世界对象而非维度编号，确保目标维度确实存在。
@@ -139,24 +138,29 @@ public class RemoteChunkTickets {
         }
         
         DistanceManager distanceManager = getDistanceManager(world);
+        applyConfiguration(distanceManager);
+        if (!loadingEnabled) return;
         
         // 清除已经完成加载的等待记录。
         waitingForLoading.removeIf((long chunkPos) -> {
+            ChunkTicketInfo info = chunkPosToTicketInfo.get(chunkPos);
+            if (info == null || info.ticketRadius == 0) return true;
             ChunkHolder chunkHolder = getChunkHolder(world, chunkPos);
             if (chunkHolder == null) {
-                return true;
+                return false;
             }
             
-            ChunkResult<LevelChunk> resultNow = chunkHolder.getEntityTickingChunkFuture()
+            ChunkResult<LevelChunk> resultNow = (info.ticketRadius == 2
+                ? chunkHolder.getEntityTickingChunkFuture() : chunkHolder.getTickingChunkFuture())
                 .getNow(null);
             
-            if (resultNow == null) {
+            if (resultNow == null || resultNow == ChunkHolder.UNLOADED_LEVEL_CHUNK) {
                 return false;
             }
             
             if (!resultNow.isSuccess()) {
                 Shuttershadow.LOGGER.error(
-                    "Chunk loading failure {} {} {}",
+                    "Chunk loading failure {} {}",
                     world, new ChunkPos(chunkPos)
                 );
             }
@@ -173,8 +177,9 @@ public class RemoteChunkTickets {
                     }
                     
                     long chunkPos = queue.removeFirstLong();
-                    if (chunkPosToTicketInfo.containsKey(chunkPos)) {
-                        addTicket(distanceManager, chunkPos);
+                    ChunkTicketInfo info = chunkPosToTicketInfo.get(chunkPos);
+                    if (info != null) {
+                        addTicket(distanceManager, chunkPos, info);
                         
                         waitingForLoading.add(chunkPos);
                     }
@@ -186,17 +191,39 @@ public class RemoteChunkTickets {
         }
     }
     
-    /** 远区块加载开关开启时为区块添加相机TICKET_TYPE及加载等级。 */
-    private static void addTicket(DistanceManager distanceManager, long chunkPos) {
-        if (!ShuttershadowConfig.ENABLE_REMOTE_CHUNK_LOADING.get()) {
-            return;
-        }
-        
+    /** 按已应用配置添加相机票据，并保存实际等级供等待和释放使用。 */
+    private void addTicket(DistanceManager distanceManager, long chunkPos, ChunkTicketInfo info) {
         ChunkPos chunkPosObj = new ChunkPos(chunkPos);
         distanceManager.addRegionTicket(
-            TICKET_TYPE, chunkPosObj, getLoadingRadius(), chunkPosObj
+            TICKET_TYPE, chunkPosObj, loadingRadius, chunkPosObj
         );
-        
+        info.ticketRadius = loadingRadius;
+    }
+
+    /** 开关或等级变化时释放旧票据，保留加载需求并重新按距离排队。 */
+    private void applyConfiguration(DistanceManager distanceManager) {
+        boolean enabled = ShuttershadowConfig.ENABLE_REMOTE_CHUNK_LOADING.get();
+        int radius = getLoadingRadius();
+        if (loadingEnabled == enabled && loadingRadius == radius) return;
+
+        waitingForLoading.clear();
+        chunksToAddTicketByDistance.clear();
+        chunkPosToTicketInfo.long2ObjectEntrySet().forEach(entry -> {
+            long chunkPos = entry.getLongKey();
+            ChunkTicketInfo info = entry.getValue();
+            removeTicket(distanceManager, chunkPos, info);
+            getQueueByDistance(info.distanceToSource).add(chunkPos);
+        });
+        loadingEnabled = enabled;
+        loadingRadius = radius;
+    }
+
+    /** 只按实际添加时的等级释放本模组票据，未提交的需求不触及原版票据。 */
+    private static void removeTicket(DistanceManager distanceManager, long chunkPos, ChunkTicketInfo info) {
+        if (info.ticketRadius == 0) return;
+        ChunkPos position = new ChunkPos(chunkPos);
+        distanceManager.removeRegionTicket(TICKET_TYPE, position, info.ticketRadius, position);
+        info.ticketRadius = 0;
     }
     
     /** 按调用者提供谓词移除不再需要的记录。 */
@@ -215,15 +242,8 @@ public class RemoteChunkTickets {
             if (!keepLoading) {
                 waitingForLoading.remove(chunkPos);
                 
-                boolean pendingTicketAdding = getQueueByDistance(ticketInfo.distanceToSource)
-                    .remove(chunkPos);
-                
-                if (!pendingTicketAdding) {
-                    ChunkPos chunkPosObj = new ChunkPos(chunkPos);
-                    distanceManager.removeRegionTicket(
-                        TICKET_TYPE, chunkPosObj, getLoadingRadius(), chunkPosObj
-                    );
-                }
+                getQueueByDistance(ticketInfo.distanceToSource).remove(chunkPos);
+                removeTicket(distanceManager, chunkPos, ticketInfo);
                 return true;
             }
             else {

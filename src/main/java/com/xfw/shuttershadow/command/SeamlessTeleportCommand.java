@@ -10,11 +10,9 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -50,7 +48,7 @@ public final class SeamlessTeleportCommand {
     /** 检查世界坐标边界，逐个调用SeamlessTeleportation。 */
     private static int teleport(CommandSourceStack source, Collection<? extends Entity> targets,
                                 ServerLevel dimension, Vec3 position) throws CommandSyntaxException {
-        if (!Level.isInSpawnableBounds(BlockPos.containing(position))) {
+        if (!SeamlessTeleportation.isValidTargetPosition(position)) {
             throw INVALID_POSITION.create();
         }
 

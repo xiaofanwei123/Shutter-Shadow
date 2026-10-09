@@ -3,6 +3,8 @@ package com.xfw.shuttershadow.mixin.exposure;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
+import com.llamalad7.mixinextras.sugar.Share;
+import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import com.xfw.shuttershadow.data.DimensionFilterResources;
 import io.github.mortuusars.exposure.Exposure;
 import net.minecraft.core.WritableRegistry;
@@ -32,14 +34,22 @@ public abstract class DimensionFilterDataMixin {
                 ? DimensionFilterResources.merge(manager, files) : files;
     }
 
-    /** 滤镜网络加载优先解析新目录，未命中时回退原资源读取。 */
+    /** 本次网络注册表加载仅合并一次滤镜资源，未命中时回退原资源读取。 */
     @WrapOperation(method = "loadContentsFromNetwork", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/server/packs/resources/ResourceProvider;getResourceOrThrow(Lnet/minecraft/resources/ResourceLocation;)Lnet/minecraft/server/packs/resources/Resource;"))
     private static Resource shuttershadow$knownPackDimensionFile(
             ResourceProvider provider, ResourceLocation file, Operation<Resource> original,
-            @Local(argsOnly = true) WritableRegistry<?> registry) {
+            @Local(argsOnly = true) WritableRegistry<?> registry,
+            @Share("dimensionFilterResources") LocalRef<Map<ResourceLocation, Resource>> resources) {
         if (registry.key().equals(Exposure.Registries.FILTER)) {
-            Resource resource = DimensionFilterResources.fromNetwork(provider, file);
+            Resource resource = DimensionFilterResources.fromNetwork(provider, file, manager -> {
+                Map<ResourceLocation, Resource> merged = resources.get();
+                if (merged == null) {
+                    merged = DimensionFilterResources.merge(manager);
+                    resources.set(merged);
+                }
+                return merged;
+            });
             if (resource != null) return resource;
         }
         return original.call(provider, file);

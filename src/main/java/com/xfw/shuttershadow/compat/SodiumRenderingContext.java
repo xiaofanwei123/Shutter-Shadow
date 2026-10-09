@@ -11,9 +11,10 @@ import java.util.ArrayDeque;
 import java.util.EnumMap;
 import java.util.Map;
 
-/** 保存一次相机渲染使用的 Sodium 视距、可见区段和任务队列。 */
+/** 保存同一 Sodium 管理器可复用的相机视距、可见区段和任务队列。 */
 public class SodiumRenderingContext {
     public RenderSectionManager owner;
+    public boolean active;
     public SortedRenderLists renderLists;
     public SectionCollector sectionCollector;
     public SectionCollector lastSectionCollector;

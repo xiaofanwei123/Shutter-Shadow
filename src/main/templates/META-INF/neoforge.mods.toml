@@ -34,8 +34,8 @@ side = "BOTH"
 [[dependencies."${mod_id}"]]
 modId = "exposure"
 type = "required"
-reason = "Shuttershadow requires Exposure 1.9.19 or newer for its camera and viewfinder integration."
-versionRange = "[1.9.19,)"
+reason = "Shuttershadow's camera and viewfinder integration is verified with Exposure 1.9.19."
+versionRange = "[1.9.19]"
 ordering = "AFTER"
 side = "BOTH"
 

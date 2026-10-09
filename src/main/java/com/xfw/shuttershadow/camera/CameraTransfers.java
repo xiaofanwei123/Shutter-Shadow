@@ -23,9 +23,9 @@ public final class CameraTransfers {
         return teleportEntity(entity, targetLevel, targetPosition, camera, () -> {});
     }
 
-    /** 事件接受并验证目标后才执行来源控制清理，取消时保留原相机。 */
+    /** 事件接受后移动主体，仅在成功时执行相机控制清理。 */
     private static @Nullable Entity teleportEntity(Entity entity, ServerLevel targetLevel,
-            Vec3 targetPosition, ItemStack camera, Runnable beforeMove) {
+            Vec3 targetPosition, ItemStack camera, Runnable afterMove) {
         if (entity == null || targetLevel == null || targetPosition == null || camera == null
                 || !(entity.level() instanceof ServerLevel sourceLevel)
                 || !sourceLevel.getServer().isSameThread()) return null;
@@ -49,19 +49,20 @@ public final class CameraTransfers {
             }
             if (!isValid(entity, before)) return null;
 
-            beforeMove.run();
-
             rotationChanged = before.getYaw() != originalYaw || before.getPitch() != originalPitch;
-            if (rotationChanged) {
-                entity.setYRot(before.getYaw());
-                entity.setXRot(before.getPitch());
-                if (before.getYaw() != originalYaw) entity.setYHeadRot(before.getYaw());
-            }
+            boolean updateRotation = rotationChanged;
             moved = SeamlessTeleportation.teleportEntity(entity, before.getTargetLevel(),
-                    before.getTargetPosition());
+                    before.getTargetPosition(), () -> {
+                        if (updateRotation) {
+                            entity.setYRot(before.getYaw());
+                            entity.setXRot(before.getPitch());
+                            if (before.getYaw() != originalYaw) entity.setYHeadRot(before.getYaw());
+                        }
+                    });
             if (moved == null) return null;
             result = CameraTransferEvent.Result.SUCCESS;
             CameraCaptureEvents.recordTransfer(camera, entity, moved);
+            afterMove.run();
             return moved;
         } catch (RuntimeException exception) {
             failure = exception;
@@ -90,13 +91,13 @@ public final class CameraTransfers {
         return teleportEntity(player, targetLevel, targetPosition, camera) == player ? player : null;
     }
 
-    /** 玩家传送获准后执行支架控制注销，再进行原无缝移动。 */
+    /** 玩家实际移动成功后注销旧支架控制，拒绝或回滚时保留取景。 */
     public static @Nullable ServerPlayer teleportPlayer(ServerPlayer player, ServerLevel targetLevel,
-            Vec3 targetPosition, ItemStack camera, Runnable beforeMove) {
-        return teleportEntity(player, targetLevel, targetPosition, camera, beforeMove) == player ? player : null;
+            Vec3 targetPosition, ItemStack camera, Runnable afterMove) {
+        return teleportEntity(player, targetLevel, targetPosition, camera, afterMove) == player ? player : null;
     }
 
-    /** 拒绝事件改成的过期世界、其他服务器、无效实体或非有限坐标和朝向。 */
+    /** 拒绝过期世界、其他服务器、无效实体、越界坐标或非有限朝向。 */
     private static boolean isValid(Entity entity, CameraTransferEvent.Before before) {
         ServerLevel target = before.getTargetLevel();
         MinecraftServer server = target.getServer();
@@ -104,7 +105,7 @@ public final class CameraTransfers {
         return server.isSameThread() && entity.getServer() == server
                 && entity.isAlive() && !entity.isRemoved()
                 && server.getLevel(target.dimension()) == target
-                && Double.isFinite(position.x) && Double.isFinite(position.y) && Double.isFinite(position.z)
+                && SeamlessTeleportation.isValidTargetPosition(position)
                 && Float.isFinite(before.getYaw()) && Float.isFinite(before.getPitch());
     }
 }

@@ -29,6 +29,6 @@ public abstract class LevelRendererRemotePlayerMixin {
             @Local PoseStack poseStack,
             @Local MultiBufferSource.BufferSource bufferSource) {
         RemotePlayerRenderer.render(
-                (LevelRenderer) (Object) this, camera, deltaTracker, poseStack, bufferSource);
+                (LevelRenderer) (Object) this, deltaTracker, poseStack, bufferSource);
     }
 }

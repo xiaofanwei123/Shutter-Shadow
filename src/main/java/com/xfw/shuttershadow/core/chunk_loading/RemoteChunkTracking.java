@@ -158,6 +158,8 @@ public class RemoteChunkTracking {
     /** 合并该玩家额外loader，登记可见维度与区块代数/距离/边界。 */
     public static void updateForPlayer(ServerPlayer player) {
         PlayerChunkLoading playerInfo = getPlayerInfo(player);
+        // 消费本轮请求，保留后续发包事件重新提出的更新。
+        playerInfo.shouldUpdateImmediately = false;
         playerInfo.visibleDimensions.clear();
         playerInfo.loadedChunks = 0;
 
@@ -165,6 +167,7 @@ public class RemoteChunkTracking {
 
         chunkLoaders.addAll(playerInfo.additionalChunkLoaders);
 
+        Map<ResourceKey<Level>, LongOpenHashSet> countedChunks = new Object2ObjectOpenHashMap<>();
         MinecraftServer server = player.server;
 
         for (ChunkLoader chunkLoader : chunkLoaders) {
@@ -180,9 +183,12 @@ public class RemoteChunkTracking {
             playerInfo.visibleDimensions.add(dimension);
 
             RemoteChunkTickets ticketInfo = RemoteChunkTickets.get(world);
+            LongOpenHashSet countedPositions = countedChunks.computeIfAbsent(dimension, ignored -> new LongOpenHashSet());
 
             chunkLoader.foreachChunkPos((dim, x, z, distanceToSource) -> {
                 long chunkPos = ChunkPos.asLong(x, z);
+                // 本次合并窗口每个区块只计一次，不受刷新代数影响。
+                if (countedPositions.add(chunkPos)) playerInfo.loadedChunks++;
                 var records =
                         chunkRecordMap.computeIfAbsent(chunkPos, k -> new Object2ObjectOpenHashMap<>());
 
@@ -199,7 +205,6 @@ public class RemoteChunkTracking {
                                 false, isBoundary
                         );
                         playerInfo.markPendingLoading(newRecord);
-                        playerInfo.loadedChunks++;
                         return newRecord;
                     } else {
                         int oldDistance = record.distanceToSource;
@@ -211,7 +216,6 @@ public class RemoteChunkTracking {
 
                             record.isBoundary = (record.isBoundary && isBoundary);
                         } else {
-                            playerInfo.loadedChunks++;
                             if (distanceToSource < oldDistance) {
                                 playerInfo.markPendingLoading(record);
                             }
@@ -370,7 +374,6 @@ public class RemoteChunkTracking {
             if (playerInfo.shouldUpdateImmediately ||
                     ((player.getId() % updateInterval) == (gameTime % updateInterval))
             ) {
-                playerInfo.shouldUpdateImmediately = false;
                 updateForPlayer(player);
             }
         }

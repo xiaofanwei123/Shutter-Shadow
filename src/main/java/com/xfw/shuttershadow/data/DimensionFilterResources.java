@@ -15,6 +15,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Function;
 
 /** 把维度滤镜数据包映射到原生滤镜注册表，沿用原生附件纹理和颜色字段。 */
 public final class DimensionFilterResources {
@@ -24,6 +25,11 @@ public final class DimensionFilterResources {
 
     /** 禁止实例化此工具类。 */
     private DimensionFilterResources() {}
+
+    /** 枚举并合并本次资源管理器的全部原生滤镜与维度滤镜。 */
+    public static Map<ResourceLocation, Resource> merge(ResourceManager manager) {
+        return merge(manager, EXPOSURE_FILES.listMatchingResources(manager));
+    }
 
     /** 扫描本模组命名空间的新路径，验证维度路径，把资源转换为Exposure虚拟文件键，并用包优先级解决同名覆盖。 */
     public static Map<ResourceLocation, Resource> merge(ResourceManager manager,
@@ -52,13 +58,19 @@ public final class DimensionFilterResources {
 
     /** 针对从网络收到的Exposure虚拟路径寻找真实资源。 */
     public static @Nullable Resource fromNetwork(ResourceProvider provider, ResourceLocation virtualFile) {
+        return fromNetwork(provider, virtualFile, DimensionFilterResources::merge);
+    }
+
+    /** 仅有效维度滤镜才读取调用方提供的合并结果，普通资源提供者保持直接回退。 */
+    public static @Nullable Resource fromNetwork(ResourceProvider provider, ResourceLocation virtualFile,
+            Function<ResourceManager, Map<ResourceLocation, Resource>> mergedResources) {
         if (!virtualFile.getNamespace().equals(Shuttershadow.MODID)
                 || !virtualFile.getPath().startsWith("exposure/filter/")
                 || !virtualFile.getPath().endsWith(".json")) return null;
         ResourceLocation id = EXPOSURE_FILES.fileToId(virtualFile);
         if (!hasDimensionPath(id)) return null;
         if (provider instanceof ResourceManager manager) {
-            return merge(manager, EXPOSURE_FILES.listMatchingResources(manager)).get(virtualFile);
+            return mergedResources.apply(manager).get(virtualFile);
         }
         // 一般 ResourceProvider 不公开包顺序：保留可直接读取的标准路径，否则读取新路径。
         return provider.getResource(virtualFile)

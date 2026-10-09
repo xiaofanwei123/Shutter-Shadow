@@ -26,6 +26,7 @@ import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
@@ -43,7 +44,9 @@ import com.xfw.shuttershadow.core.render.MyGameRenderer;
 import com.xfw.shuttershadow.core.render.WorldRenderInfo;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** 客户端远维度相机入口。 */
 @EventBusSubscriber(modid = Shuttershadow.MODID, value = Dist.CLIENT)
@@ -56,7 +59,6 @@ public final class ImmersiveCameraClient {
     private static RemoteSceneStartS2C scene;
     /** 仅在 Exposure 后台截图期间使用，普通游戏画面仍由取景器会话决定。 */
     private static CaptureSnapshot screenshot;
-    private static Entity screenshotStand;
 
     /** 单调递增的会话序号，用于匹配请求与响应，防止过期包污染新会话。 */
     private static long nextSequence;
@@ -78,16 +80,17 @@ public final class ImmersiveCameraClient {
             Minecraft mc = Minecraft.getInstance();
             return mc.player != null && connection == mc.getConnection() && mc.player.level() == sourceLevel;
         }
+    }
 
-        /** 后台截图只要求玩家、同连接和来源level存在，避免短暂Minecraft世界作用域切换使截图误判失效。 */
+    /** 固定持有者、来源世界、连接、场景、相机Y偏移和支架投影模式的镜头快照。 */
+    private record CaptureSnapshot(Entity holder, ClientLevel sourceLevel, ClientPacketListener connection,
+                                   RemoteSceneStartS2C scene, double cameraYOffset, boolean standView) {
+        /** 截图仅要求玩家、原连接和来源世界存在，允许关闭预览或玩家换维后继续绘制。 */
         boolean validForCapture() {
             Minecraft mc = Minecraft.getInstance();
             return mc.player != null && connection == mc.getConnection() && sourceLevel != null;
         }
-    }
 
-    /** 固定会话、场景和相机Y偏移的单帧快照。 */
-    private record CaptureSnapshot(Session session, RemoteSceneStartS2C scene, double cameraYOffset) {
         /** 将来源位置减源原点，再按场景比例映射到目标原点并应用Y偏移。 */
         Vec3 targetPosition(Vec3 sourcePosition, double yOffset) {
             return DimensionFilters.mapRelative(sourcePosition.subtract(scene.sourceOrigin()),
@@ -151,7 +154,8 @@ public final class ImmersiveCameraClient {
         if (mc.player == null || mc.getCameraEntity() != stand) return false;
         boolean remoteStand = session != null && session.cameraStandId() == stand.getId()
                 && session.sourceLevel() == stand.level();
-        if (!remoteStand && screenshotStand != stand && stand.level() == mc.player.level()
+        boolean capturingStand = screenshot != null && screenshot.holder() == stand;
+        if (!remoteStand && !capturingStand && stand.level() == mc.player.level()
                 && !SourceStandCapture.isRenderingSourceScene()
                 && Attachment.FILTER.get(stand.getCamera()).getForReading()
                         .get(Shuttershadow.DIMENSION_FILTER_TARGET.get()) == null) return false;
@@ -164,7 +168,7 @@ public final class ImmersiveCameraClient {
         if (SourceStandCapture.isRenderingSourceScene()) return null;
         // 支架截图状态只存在于一次同步离屏绘制内。
         if (screenshot != null && BackgroundScreenshotCaptureTask.isCapturing()
-                && screenshot.session().validForCapture()) return screenshot;
+                && screenshot.validForCapture()) return screenshot;
         return viewSnapshot();
     }
 
@@ -178,24 +182,22 @@ public final class ImmersiveCameraClient {
         // 从相机物品读取 Y 偏移；无则 0
         double offset = current.camera()
                 .map((item, stack) -> item.getYPositionOffset(stack)).orElse(0.0D);
-        return new CaptureSnapshot(session, scene, offset);
+        return new CaptureSnapshot(cameraAnchor(session), session.sourceLevel(), session.connection(),
+                scene, offset, session.cameraStandId() >= 0);
     }
 
     /** 为公开拍摄场景建立任意真实持有者的临时镜头，不打开用户取景会话。 */
     static void beginScreenshot(RemoteSceneStartS2C scene, Entity holder, ItemStack camera) {
         Minecraft mc = Minecraft.getInstance();
         double offset = camera.getItem() instanceof CameraItem item ? item.getYPositionOffset(camera) : 0.0D;
-        screenshot = new CaptureSnapshot(new Session(scene.sequence(), null, null,
-                holder instanceof CameraStandEntity stand ? stand.getId() : -1,
-                mc.getConnection(), (ClientLevel) holder.level()), scene, offset);
-        screenshotStand = holder;
+        screenshot = new CaptureSnapshot(holder, (ClientLevel) holder.level(), mc.getConnection(),
+                scene, offset, holder instanceof CameraStandEntity stand && stand.getId() >= 0);
     }
 
     /** 只清除序号匹配的临时目标截图。 */
     static void endScreenshot(long sequence) {
         if (screenshot != null && screenshot.scene().sequence() == sequence) {
             screenshot = null;
-            screenshotStand = null;
         }
     }
 
@@ -218,31 +220,31 @@ public final class ImmersiveCameraClient {
 
     /** 把源锚点插值眼位映射到目标场景并应用相机Y偏移。 */
     private static Vec3 cameraPosition(CaptureSnapshot snapshot, float partialTick) {
-        return snapshot.targetPosition(cameraAnchor(snapshot.session()).getEyePosition(partialTick),
+        return snapshot.targetPosition(snapshot.holder().getEyePosition(partialTick),
                 snapshot.cameraYOffset());
     }
 
     /** 只在匹配的目标支架渲染堆栈内枚举真实来源玩家，按服务端玩家半径筛选并插值，再生成目标投影位置/相机位置记录。 */
-    static List<PlayerProjection> playerProjections(ClientLevel remote, Camera remoteCamera, float partialTick) {
+    static List<PlayerProjection> playerProjections(ClientLevel remote, float partialTick) {
         if (!rendering) return List.of();
         CaptureSnapshot snapshot = captureSnapshot();
         // 手持自拍仍由 Exposure 原生玩家视角与自拍流程处理。
-        if (snapshot == null || snapshot.session().cameraStandId() < 0) return List.of();
-        ClientLevel source = snapshot.session().sourceLevel();
+        if (snapshot == null || !snapshot.standView()) return List.of();
+        ClientLevel source = snapshot.sourceLevel();
         if (source == null) return List.of();
 
         // 实体钩子可能在进入世界或渲染上下文出栈后调用，
         // 读取渲染栈顶前必须确认栈不为空。
         if (!WorldRenderInfo.isRendering()) return List.of();
         WorldRenderInfo renderInfo = WorldRenderInfo.getTopRenderInfo();
-        if (renderInfo == null || renderInfo.world != remote
+        if (renderInfo.world != remote
                 || !remote.dimension().location().equals(snapshot.scene().dimension())) return List.of();
 
         // Exposure 的眼位判定用于实体记录和传送资格，不能控制整个模型的显示。
         // IP 已同步此范围的源玩家；取景器和离屏照片共用同一套绘制候选。
         List<AbstractClientPlayer> players = source.players();
         double radius = ShuttershadowConfig.standPlayerRadius();
-        Vec3 cameraPos = renderInfo.cameraPos != null ? renderInfo.cameraPos : remoteCamera.getPosition();
+        Vec3 cameraPos = renderInfo.cameraPos;
         List<PlayerProjection> projections = new ArrayList<>(players.size());
         for (AbstractClientPlayer player : players) {
             if (player.level() != source || player.isRemoved() || !player.isAlive()) continue;
@@ -262,9 +264,8 @@ public final class ImmersiveCameraClient {
     static record PlayerProjection(AbstractClientPlayer player, ClientLevel level, Vec3 position,
                                    Vec3 cameraPosition) {}
 
-    /** 后台截图用其支架。 */
+    /** 预览优先使用来源支架，实体暂时缺失时沿用当前相机或玩家。 */
     private static Entity cameraAnchor(Session session) {
-        if (screenshot != null && screenshot.session() == session) return screenshotStand;
         Minecraft mc = Minecraft.getInstance();
         if (session.cameraStandId() >= 0 && session.sourceLevel() != null) {
             Entity stand = session.sourceLevel().getEntity(session.cameraStandId());
@@ -293,13 +294,12 @@ public final class ImmersiveCameraClient {
         if (snapshot == null) return false;
         Minecraft mc = Minecraft.getInstance();
         RemoteSceneStartS2C currentScene = snapshot.scene();
-        // 从 IP 的世界加载器取远程维度实例（只查询，不加载/卸载）
+        // 取得或创建目标客户端世界；创建失败时由加载器抛出异常。
         ClientLevel remote = ClientWorldLoader.getWorld(
                 ResourceKey.create(Registries.DIMENSION, currentScene.dimension()));
-        if (remote == null) return false;
-        ClientLevel sourceLevel = snapshot.session().sourceLevel();
+        ClientLevel sourceLevel = snapshot.sourceLevel();
         float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
-        Entity holder = cameraAnchor(snapshot.session());
+        Entity holder = snapshot.holder();
         Vec3 position = cameraPosition(snapshot, partialTick);
         Camera original = mc.gameRenderer.getMainCamera();
         // 先把主相机设回源世界状态，保存原始位置以便恢复
@@ -351,7 +351,7 @@ public final class ImmersiveCameraClient {
         CaptureSnapshot preview = viewSnapshot();
         CameraViewEvents.tick(preview == null ? null : preview.scene().dimension(),
                 preview == null ? null : preview.targetPosition(
-                        cameraAnchor(preview.session()).position(), 0.0D));
+                        preview.holder().position(), 0.0D));
         if (deferredCameraResetTicks > 0) {
             deferredCameraResetTicks--;
         } else {
@@ -431,6 +431,17 @@ public final class ImmersiveCameraClient {
         }
     }
 
+    /** 固定本刻观察和待截图的粒子维度，保留等待快门的场景但不额外更新。 */
+    public static Set<ResourceLocation> particleDimensions() {
+        Set<ResourceLocation> dimensions = new HashSet<>();
+        CaptureSnapshot preview = viewSnapshot();
+        if (preview != null) dimensions.add(preview.scene().dimension());
+        if (screenshot != null && BackgroundScreenshotCaptureTask.isCapturing()
+                && screenshot.validForCapture()) dimensions.add(screenshot.scene().dimension());
+        RemoteStandCapture.addPendingParticleDimensions(dimensions);
+        return dimensions;
+    }
+
     /** 未暂停且有目标场景时临时切换目标世界与camera position，在已加载镜头区块每两tick animateTick，随后tick目标粒子。 */
     private static void tickRemoteParticles(Minecraft mc) {
         CaptureSnapshot snapshot = captureSnapshot();
@@ -438,7 +449,6 @@ public final class ImmersiveCameraClient {
         if (snapshot == null || mc.isPaused()) return;
         ClientLevel remote = ClientWorldLoader.getWorld(
                 ResourceKey.create(Registries.DIMENSION, snapshot.scene().dimension()));
-        if (remote == null) return;
         // 远程就是当前世界，无需额外 tick
         if (remote == mc.level) return;
         Vec3 position = cameraPosition(snapshot, 1.0F);
@@ -482,7 +492,6 @@ public final class ImmersiveCameraClient {
             SourceStandCapture.cancelAll();
             close();
             screenshot = null;
-            screenshotStand = null;
             suppressRemoteScene = false;
             deferredCameraResetTicks = 0;
         }

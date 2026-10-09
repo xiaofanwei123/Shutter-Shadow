@@ -16,6 +16,7 @@ import io.github.mortuusars.exposure.world.entity.CameraStandEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import io.github.mortuusars.exposure.world.entity.CameraOperator;
@@ -27,6 +28,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /** 手动支架目标维度背景截图任务。 */
@@ -36,6 +38,7 @@ public final class RemoteStandCapture extends Capture<Image> {
     private static PreparedScreenshot renderingScreenshot;
 
     private final ClientPacketListener connection = Minecraft.getInstance().getConnection();
+    private final ResourceLocation particleDimension;
 
     /** 过滤会长期改变界面的HideGuiAction和SetCameraEntityAction，组合其余动作后委托私有构造器。 */
     public RemoteStandCapture(RemoteSceneStartS2C scene, Entity stand, CaptureAction[] actions) {
@@ -49,6 +52,7 @@ public final class RemoteStandCapture extends Capture<Image> {
     private RemoteStandCapture(RemoteSceneStartS2C scene, Entity stand,
                                CaptureAction actions) {
         super(new PreparedScreenshot(scene, stand, actions), delayOnly(actions));
+        particleDimension = scene.dimension();
         ACTIVE.put(scene.sequence(), this);
         timer.whenEnded(() -> capturingTask.execute().whenComplete((result, error) ->
                 finish(error == null ? result : Result.error(ERROR_FAILED_GENERIC))));
@@ -76,6 +80,13 @@ public final class RemoteStandCapture extends Capture<Image> {
     /** 判断是否正在绘制手动支架的目标维度截图。 */
     public static boolean isRenderingScreenshot() {
         return renderingScreenshot != null;
+    }
+
+    /** 保留快门延迟及截图期间的目标粒子，完成的任务不再固定场景。 */
+    static void addPendingParticleDimensions(Set<ResourceLocation> dimensions) {
+        for (RemoteStandCapture capture : ACTIVE.values()) {
+            if (!capture.isDone()) dimensions.add(capture.particleDimension);
+        }
     }
 
     /** 仅转发拍摄延迟动作，让截图任务自行执行拍摄前后的效果。 */

@@ -18,7 +18,8 @@ public final class CameraSubjectsEvent extends Event {
     public CameraSubjectsEvent(CameraCaptureContext context, Purpose purpose,
                                List<? extends LivingEntity> candidates, List<? extends LivingEntity> selected) {
         this.context = context; this.purpose = purpose;
-        this.candidates = List.copyOf(candidates); subjects = List.copyOf(selected);
+        this.candidates = List.copyOf(candidates);
+        select(selected);
     }
     /** 返回拍摄上下文。 */
     public CameraCaptureContext getContext() { return context; }

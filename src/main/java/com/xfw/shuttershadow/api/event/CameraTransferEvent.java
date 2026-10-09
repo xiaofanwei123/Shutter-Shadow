@@ -99,7 +99,7 @@ public abstract class CameraTransferEvent extends Event {
             this.targetLevel = Objects.requireNonNull(targetLevel);
         }
 
-        /** 修改目标脚底位置，执行前会拒绝非有限坐标。 */
+        /** 修改目标脚底位置，执行前会拒绝非有限或超出原版范围的坐标。 */
         public void setTargetPosition(Vec3 targetPosition) {
             this.targetPosition = Objects.requireNonNull(targetPosition);
         }

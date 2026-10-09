@@ -11,6 +11,9 @@ import net.minecraft.client.renderer.culling.Frustum;
 public interface IEWorldRenderer {
     /** 取得ViewArea存储。 */
     ViewArea ip_getBuiltChunkStorage();
+
+    /** 清空旧可见列表与遮挡图引用，保留仍需复用的区段网格。 */
+    void ip_resetTerrain();
     
     /** 取得透明后处理PostChain。 */
     PostChain portal_getTransparencyShader();

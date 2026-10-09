@@ -17,11 +17,6 @@ import com.xfw.shuttershadow.core.VanillaRuntimeHooks;
 /** 跨维度实体位置、眼高与现有区块状态工具。 */
 public class McHelper {
     
-    /** 取得实体上一游戏刻的脚底位置。 */
-    public static Vec3 lastTickPosOf(Entity entity) {
-        return new Vec3(entity.xo, entity.yo, entity.zo);
-    }
-    
     /** 将玩家视距限制在服务器允许的范围内。 */
     @VanillaRuntimeHooks
     public static int getPlayerLoadDistance(ServerPlayer player) {

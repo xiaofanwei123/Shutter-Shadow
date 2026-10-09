@@ -2,6 +2,7 @@ package com.xfw.shuttershadow.mixin.exposure;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.xfw.shuttershadow.client.CameraImageEvents;
 import com.xfw.shuttershadow.client.RemoteStandCapture;
@@ -33,8 +34,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.function.Function;
-
 /** 按拍摄参数选择手动目标维度截图或红石源维度截图。 */
 @Mixin(value = CameraCaptureTemplate.class, remap = false)
 public abstract class CameraCaptureTemplateRemoteMixin {
@@ -57,7 +56,7 @@ public abstract class CameraCaptureTemplateRemoteMixin {
         return source == null ? null : source.getEntity(id);
     }
     /** 根据拍摄参数创建红石源世界截图或手动远景截图任务。 */
-    @WrapOperation(method = "createTask", at = @At(value = "INVOKE", ordinal = 0, target =
+    @WrapOperation(method = "createTask", at = @At(value = "INVOKE", target =
             "Lio/github/mortuusars/exposure/client/capture/Capture;of(Lio/github/mortuusars/exposure/util/cycles/task/Task;[Lio/github/mortuusars/exposure/client/capture/action/CaptureAction;)Lio/github/mortuusars/exposure/client/capture/Capture;"))
     private Capture<Image> shuttershadow$remoteStandShot(Task<Result<Image>> screenshot,
             CaptureAction[] actions, Operation<Capture<Image>> original,
@@ -74,19 +73,18 @@ public abstract class CameraCaptureTemplateRemoteMixin {
     }
 
     /** 在两个原生图片来源的颜色处理前发布主线程图片事件，保留失败任务原出口。 */
-    @WrapOperation(method = "createTask", at = {
-            @At(value = "INVOKE", ordinal = 0, target =
-                    "Lio/github/mortuusars/exposure/util/cycles/task/Task;thenAsync(Ljava/util/function/Function;)Lio/github/mortuusars/exposure/util/cycles/task/Task;"),
-            @At(value = "INVOKE", ordinal = 2, target =
-                    "Lio/github/mortuusars/exposure/util/cycles/task/Task;thenAsync(Ljava/util/function/Function;)Lio/github/mortuusars/exposure/util/cycles/task/Task;")})
-    private Task<Image> shuttershadow$imageReady(Task<Image> images, Function<Image, Image> effects,
-            Operation<Task<Image>> original, @Local(argsOnly = true) CaptureParameters parameters,
+    @ModifyExpressionValue(method = "createTask", at = {
+            @At(value = "INVOKE", target =
+                    "Lio/github/mortuusars/exposure/client/capture/Capture;handleErrorAndGetResult(Ljava/util/function/Consumer;)Lio/github/mortuusars/exposure/util/cycles/task/Task;"),
+            @At(value = "INVOKE", target =
+                    "Lio/github/mortuusars/exposure/client/capture/Capture;logErrorAndGetResult(Lorg/slf4j/Logger;)Lio/github/mortuusars/exposure/util/cycles/task/Task;")})
+    private Task<Image> shuttershadow$imageReady(Task<Image> images,
+            @Local(argsOnly = true) CaptureParameters parameters,
             @Local Entity cameraHolder) {
         RemoteSceneStartS2C scene = parameters.extraData().get(RemoteSceneStartS2C.CAPTURE_SCENE).orElse(null);
         ResourceLocation sourceDimension = scene == null
                 ? cameraHolder.level().dimension().location() : scene.sourceDimension();
-        return original.call(CameraImageEvents.beforeEffects(images, parameters, sourceDimension,
-                cameraHolder.getId()), effects);
+        return CameraImageEvents.beforeEffects(images, parameters, sourceDimension, cameraHolder.getId());
     }
 
     /** 原生空任务和异步处理失败时报告原连接，保留 Exposure 已有错误处理。 */

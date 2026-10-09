@@ -1,9 +1,11 @@
 package com.xfw.shuttershadow.core.render;
 
 import com.xfw.shuttershadow.Shuttershadow;
+import com.xfw.shuttershadow.ShuttershadowConfig;
 
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -39,6 +41,8 @@ public class RemoteViewArea extends ViewArea {
     /** 保存单个水平区块的全部渲染区段与最近活跃时间。 */
     public static class Column {
         public long mark = 0;
+        // 索引提前淘汰后，区段仍保留原预设的有效期和回收宽限。
+        public long retiredPresetActiveTime = 0;
         public RenderSection[] sections;
 
         /** 保存该区块的渲染区段数组。 */
@@ -62,12 +66,13 @@ public class RemoteViewArea extends ViewArea {
 
     private final SectionRenderDispatcher factory;
     private final Long2ObjectOpenHashMap<Column> columnMap = new Long2ObjectOpenHashMap<>();
-    private final Long2ObjectOpenHashMap<Preset> presets = new Long2ObjectOpenHashMap<>();
+    private final Long2ObjectLinkedOpenHashMap<Preset> presets = new Long2ObjectLinkedOpenHashMap<>();
 
     public final int minSectionY;
     public final int endSectionY;
 
     private boolean isAlive = true;
+    private boolean playerPresetActive;
 
     /** 区块卸载时，重置对应远景渲染区段。 */
     public static void onClientChunkUnload(LevelChunk chunk) {
@@ -96,6 +101,19 @@ public class RemoteViewArea extends ViewArea {
                 }
             }
         });
+    }
+
+    /** 换维后让新主渲染器重新接入原版网格与遮挡图。 */
+    public static void onPlayerDimensionChanged() {
+        for (LevelRenderer renderer : ClientWorldLoader.WORLD_RENDERER_MAP.values()) {
+            ViewArea area = ((IEWorldRenderer) renderer).ip_getBuiltChunkStorage();
+            if (area instanceof RemoteViewArea remoteViewArea) {
+                if (remoteViewArea.playerPresetActive && !remoteViewArea.isPlayerWorld()) {
+                    ((IEWorldRenderer) renderer).ip_resetTerrain();
+                }
+                remoteViewArea.playerPresetActive = false;
+            }
+        }
     }
 
     /** 初始化视区，保存区段创建方式与世界高度边界。 */
@@ -138,6 +156,11 @@ public class RemoteViewArea extends ViewArea {
     /** 取得或创建相机中心的视区预设，并切换当前区段索引。 */
     @Override
     public void repositionCamera(double playerX, double playerZ) {
+        // 后台世界由 rawFetch 按目标镜头范围创建区段，不建立来源坐标的完整网格。
+        if (!isPlayerWorld()) {
+            playerPresetActive = false;
+            return;
+        }
         Minecraft.getInstance().getProfiler().push("built_section_storage");
 
         int cameraBlockX = Mth.floor(playerX);
@@ -145,21 +168,47 @@ public class RemoteViewArea extends ViewArea {
 
         int cameraChunkX = cameraBlockX >> 4;
         int cameraChunkZ = cameraBlockZ >> 4;
-        ChunkPos cameraChunkPos = new ChunkPos(
-                cameraChunkX, cameraChunkZ
-        );
-
-        Preset preset = presets.computeIfAbsent(
-                cameraChunkPos.toLong(),
-                whatever -> {
-                    return createPresetByChunkPos(cameraChunkX, cameraChunkZ);
-                }
-        );
+        long cameraChunkPos = ChunkPos.asLong(cameraChunkX, cameraChunkZ);
+        Preset preset = presets.getAndMoveToLast(cameraChunkPos);
+        if (preset == null) {
+            preset = createPresetByChunkPos(cameraChunkX, cameraChunkZ);
+            presets.putAndMoveToLast(cameraChunkPos, preset);
+        }
         preset.lastActiveTime = System.nanoTime();
 
         this.sections = preset.data;
+        playerPresetActive = true;
+
+        trimPresets();
 
         Minecraft.getInstance().getProfiler().pop();
+    }
+
+    /** 按客户端配置淘汰旧索引，保留当前视区和区段原有的延迟回收期。 */
+    private void trimPresets() {
+        int maxCachedPresets = ShuttershadowConfig.maxCachedViewPresets();
+        while (presets.size() > maxCachedPresets) {
+            long retiredCenter = presets.firstLongKey();
+            Preset retired = presets.removeFirst();
+            // 只移除历史索引引用，不修改数组或立即释放异步遮挡图可能使用的区段。
+            foreachPresetCoveredChunkPoses(ChunkPos.getX(retiredCenter), ChunkPos.getZ(retiredCenter), key -> {
+                Column column = columnMap.get(key);
+                column.retiredPresetActiveTime = Math.max(column.retiredPresetActiveTime, retired.lastActiveTime);
+            });
+        }
+    }
+
+    /** 首次成为玩家主世界时补齐普通视距网格，并通知调用方重置遮挡图。 */
+    public boolean preparePlayerView(double playerX, double playerZ) {
+        if (playerPresetActive || !isPlayerWorld()) return false;
+        repositionCamera(playerX, playerZ);
+        return true;
+    }
+
+    /** 用玩家真实所属世界判断主网格，避免临时远景上下文误判。 */
+    private boolean isPlayerWorld() {
+        Minecraft client = Minecraft.getInstance();
+        return client.player != null && client.player.level() == level;
     }
 
     /** 根据真实区段坐标标记网格需要重建。 */
@@ -271,6 +320,9 @@ public class RemoteViewArea extends ViewArea {
             return;
         }
 
+        if (!isPlayerWorld()) playerPresetActive = false;
+        trimPresets();
+
         ClientLevel worldClient = Minecraft.getInstance().level;
         if (worldClient != null) {
             if (GcMonitor.isMemoryNotEnough()) {
@@ -300,6 +352,10 @@ public class RemoteViewArea extends ViewArea {
 
             boolean shouldDropPreset = shouldDropPreset(dropTime, currentTime, preset);
 
+            if (shouldDropPreset && preset.data == sections) {
+                sections = new RenderSection[sections.length];
+            }
+
             if (!shouldDropPreset) {
                 foreachPresetCoveredChunkPoses(
                         ChunkPos.getX(centerChunkPos),
@@ -321,7 +377,8 @@ public class RemoteViewArea extends ViewArea {
         columnMap.long2ObjectEntrySet().removeIf(entry -> {
             Column column = entry.getValue();
 
-            boolean shouldRemove = currentTime - column.mark > timeThreshold;
+            boolean shouldRemove = currentTime - column.mark > timeThreshold
+                    && currentTime - column.retiredPresetActiveTime > dropTime + timeThreshold;
             if (shouldRemove) {
                 toDelete.addAll(Arrays.asList(column.sections));
             }
@@ -330,6 +387,8 @@ public class RemoteViewArea extends ViewArea {
         });
 
         if (!toDelete.isEmpty()) {
+            // 后台不消费原版遮挡图，回收列时同步断开编译回调保留的区段引用。
+            if (!isPlayerWorld()) ((IEWorldRenderer) levelRenderer).ip_resetTerrain();
             CoreSettings.PRE_GAME_RENDER_TASK_LIST.addTask(() -> {
                 if (toDelete.isEmpty()) {
                     return true;
@@ -349,9 +408,9 @@ public class RemoteViewArea extends ViewArea {
         Minecraft.getInstance().getProfiler().pop();
     }
 
-    /** 保留当前视区预设，判断其他预设是否已经过期。 */
+    /** 只固定玩家主世界的当前网格，后台旧预设按活跃时间回收。 */
     private boolean shouldDropPreset(long dropTime, long currentTime, Preset preset) {
-        if (preset.data == this.sections) {
+        if (isPlayerWorld() && preset.data == this.sections) {
             return false;
         }
         return currentTime - preset.lastActiveTime > dropTime;
@@ -383,7 +442,7 @@ public class RemoteViewArea extends ViewArea {
             RenderSection result = this.sections[sectionIndex];
 
             if (result == null) {
-                Shuttershadow.LOGGER.error("Null RenderChunk {}", pos);
+                if (playerPresetActive) Shuttershadow.LOGGER.error("Null RenderChunk {}", pos);
                 return null;
             }
 

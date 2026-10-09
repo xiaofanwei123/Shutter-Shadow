@@ -130,7 +130,7 @@ public class MyGameRenderer {
             ((IESectionRenderDispatcher) worldRenderer.getSectionRenderDispatcher())
                 .ip_setFixedBuffers(newRenderBuffers.fixedBufferPack());
 
-            newSodiumContext = SodiumInterface.invoker.createNewContext(renderDistance);
+            newSodiumContext = SodiumInterface.invoker.acquireContext(renderDistance);
             SodiumInterface.invoker.switchContextWithCurrentWorldRenderer(newSodiumContext);
             sodiumContextSwapped = true;
 

@@ -1,6 +1,7 @@
 package com.xfw.shuttershadow.core.teleportation;
 
 import com.xfw.shuttershadow.Shuttershadow;
+import com.xfw.shuttershadow.api.SeamlessTeleportation;
 import com.xfw.shuttershadow.camera.DimensionFilmCapture;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -10,6 +11,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.apache.commons.lang3.Validate;
 import com.xfw.shuttershadow.core.ServerRuntimeState;
@@ -20,6 +23,7 @@ import com.xfw.shuttershadow.access.IEEntity;
 import com.xfw.shuttershadow.access.IEServerPlayerEntity;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /** 执行玩家和普通实体的单主体传送，原载具与其他乘客留在来源世界。 */
@@ -53,6 +57,21 @@ public class ServerTeleportationManager {
         ServerPlayer player, ResourceKey<Level> dimensionTo, Vec3 newPos,
         boolean sendPacket
     ) {
+        ServerLevel toWorld = player.server.getLevel(dimensionTo);
+        if (toWorld == null) {
+            Shuttershadow.LOGGER.error(
+                "Cannot teleport player {} to non-existing dimension {}",
+                player, dimensionTo.location()
+            );
+            return false;
+        }
+        return forceTeleportPlayer(player, toWorld, newPos, sendPacket, () -> {});
+    }
+
+    /** 换维和下车均获准后执行移动准备，随后复用玩家实例移动。 */
+    private boolean forceTeleportPlayer(ServerPlayer player, ServerLevel toWorld,
+                                        Vec3 newPos, boolean sendPacket, Runnable beforeMove) {
+        if (!SeamlessTeleportation.isValidTargetPosition(newPos)) return false;
         // 胶卷主动传送可通过；保护期内其他传送请求继续拦截。
         if (DimensionFilmCapture.shouldBlockPortalTeleport(player)
             && !DimensionFilmCapture.isExplicitTransferInProgress(player)) {
@@ -61,25 +80,26 @@ public class ServerTeleportationManager {
 
 
         ServerLevel fromWorld = (ServerLevel) player.level();
-        ServerLevel toWorld = player.server.getLevel(dimensionTo);
-
-        if (toWorld == null) {
-            Shuttershadow.LOGGER.error(
-                "Cannot teleport player {} to non-existing dimension {}",
-                player, dimensionTo.location()
-            );
-            return false;
-        }
 
         if (fromWorld != toWorld && toWorld.entityManager.isLoaded(player.getUUID())) return false;
-        if (!detach(player)) return false;
-
-        if (fromWorld == toWorld) {
-            player.setPos(newPos.x, newPos.y, newPos.z);
-        }
-        else {
-            if (!changePlayerDimension(player, fromWorld, toWorld,
-                    newPos.add(McHelper.getEyeOffset(player)))) return false;
+        if (fromWorld != toWorld && !CommonHooks.onTravelToDimension(player, toWorld.dimension())) return false;
+        if (player.level() != fromWorld || player.isRemoved() || !player.isAlive()) return false;
+        RidingState riding = RidingState.capture(player);
+        try {
+            if (!detach(player)) {
+                riding.restore();
+                return false;
+            }
+            beforeMove.run();
+            if (fromWorld == toWorld) {
+                player.setPos(newPos.x, newPos.y, newPos.z);
+            } else if (!changePlayerDimension(player, fromWorld, toWorld, newPos)) {
+                riding.restore();
+                return false;
+            }
+        } catch (RuntimeException failure) {
+            riding.restoreAfterFailure(failure);
+            throw failure;
         }
         
         if (sendPacket) {
@@ -97,6 +117,9 @@ public class ServerTeleportationManager {
         
 
         RemoteChunkTracking.immediatelyUpdateForPlayer(player);
+        if (fromWorld != toWorld) {
+            EventHooks.firePlayerChangedDimensionEvent(player, fromWorld.dimension(), toWorld.dimension());
+        }
         return true;
     }
 
@@ -105,7 +128,7 @@ public class ServerTeleportationManager {
         ServerPlayer player,
         ServerLevel fromWorld,
         ServerLevel toWorld,
-        Vec3 newEyePos
+        Vec3 newPos
     ) {
         Vec3 oldPos = player.position();
         float oldYaw = player.getYRot();
@@ -117,7 +140,7 @@ public class ServerTeleportationManager {
             PacketRedirection.withForceRedirect(fromWorld,
                     () -> fromWorld.removePlayerImmediately(player, Entity.RemovalReason.CHANGED_DIMENSION));
             ((IEEntity) player).ip_unsetRemoved();
-            McHelper.setEyePos(player, newEyePos, newEyePos);
+            McHelper.setPosAndLastTickPos(player, newPos, newPos);
             McHelper.updateBoundingBox(player);
             player.setServerLevel(toWorld);
             PacketRedirection.withForceRedirect(toWorld, () -> toWorld.addDuringTeleport(player));
@@ -147,8 +170,7 @@ public class ServerTeleportationManager {
         }
         ((IEEntity) player).ip_unsetRemoved();
         player.setServerLevel(fromWorld);
-        McHelper.setEyePos(player, oldPos.add(McHelper.getEyeOffset(player)),
-                oldPos.add(McHelper.getEyeOffset(player)));
+        McHelper.setPosAndLastTickPos(player, oldPos, oldPos);
         player.setYRot(yaw);
         player.setXRot(pitch);
         player.setYHeadRot(headYaw);
@@ -173,22 +195,50 @@ public class ServerTeleportationManager {
         return !entity.isVehicle();
     }
 
+    /** 保存直接骑乘关系，拒绝移动时尝试恢复，不覆盖事件建立的新关系。 */
+    private record RidingState(Entity entity, Level sourceWorld, Entity vehicle, List<Entity> passengers) {
+        /** 在任何下车操作之前保存来源关系。 */
+        private static RidingState capture(Entity entity) {
+            return new RidingState(entity, entity.level(), entity.getVehicle(), List.copyOf(entity.getPassengers()));
+        }
+
+        /** 只恢复仍在来源世界的存活主体，重新上车继续尊重挂载事件。 */
+        private void restore() {
+            if (!entity.isAlive() || entity.isRemoved() || entity.level() != sourceWorld) return;
+            if (vehicle != null && vehicle.isAlive() && !vehicle.isRemoved()
+                    && vehicle.level() == sourceWorld && !entity.isPassenger()) {
+                entity.startRiding(vehicle, true);
+            }
+            for (Entity passenger : passengers) {
+                if (!entity.isAlive() || entity.isRemoved() || entity.level() != sourceWorld) return;
+                if (passenger.isAlive() && !passenger.isRemoved() && passenger.level() == sourceWorld
+                        && !passenger.isPassenger()) passenger.startRiding(entity, true);
+            }
+        }
+
+        /** 保留原失败原因，恢复骑乘时的异常作为附加信息。 */
+        private void restoreAfterFailure(RuntimeException failure) {
+            try {
+                restore();
+            } catch (RuntimeException rollbackFailure) {
+                if (failure != rollbackFailure) failure.addSuppressed(rollbackFailure);
+            }
+        }
+    }
+
     /** 判断实体是否正在本游戏刻内传送。 */
     public boolean isTeleporting(Entity entity) {
         return teleportingEntities.contains(entity);
     }
 
-    /** 校验实体和目标世界，执行普通实体传送。 */
+    /** 按原实体眼高将公开眼位参数转为脚底坐标，再解析目标世界。 */
     public Entity changeEntityDimension(
         Entity entity,
         ResourceKey<Level> toDimension,
         Vec3 newEyePos
     ) {
-        if (entity.getRemovalReason() != null) {
-            Shuttershadow.LOGGER.error("Trying to teleport a removed entity {}", entity, new Throwable());
-            return null;
-        }
-        
+        Vec3 newPos = newEyePos.subtract(McHelper.getEyeOffset(entity));
+        if (!SeamlessTeleportation.isValidTargetPosition(newPos)) return null;
         MinecraftServer server = entity.getServer();
         Validate.notNull(server, "server is null");
 
@@ -201,63 +251,128 @@ public class ServerTeleportationManager {
             );
             return null;
         }
+        return changeEntityDimension(entity, toWorld, newPos, () -> {});
+    }
 
+    /** 普通实体获准换维及下车后重建目标实例，拒绝登记时恢复来源骑乘。 */
+    private Entity changeEntityDimension(Entity entity, ServerLevel toWorld,
+                                          Vec3 newPos, Runnable beforeMove) {
+        if (!SeamlessTeleportation.isValidTargetPosition(newPos)) return null;
+        if (entity.getRemovalReason() != null) {
+            Shuttershadow.LOGGER.error("Trying to teleport a removed entity {}", entity, new Throwable());
+            return null;
+        }
         if (toWorld.entityManager.isLoaded(entity.getUUID())) return null;
-
+        Level sourceWorld = entity.level();
+        if (sourceWorld != toWorld && !CommonHooks.onTravelToDimension(entity, toWorld.dimension())) return null;
+        if (entity.level() != sourceWorld || entity.isRemoved() || !entity.isAlive()) return null;
         Entity oldEntity = entity;
         Entity newEntity = entity.getType().create(toWorld);
         if (newEntity == null) {
             return null;
         }
 
-        newEntity.restoreFrom(oldEntity);
-        newEntity.setId(oldEntity.getId());
-        McHelper.setEyePos(newEntity, newEyePos, newEyePos);
-        McHelper.updateBoundingBox(newEntity);
-        newEntity.setYHeadRot(oldEntity.getYHeadRot());
+        RidingState riding = RidingState.capture(oldEntity);
+        try {
+            if (!detach(oldEntity)) {
+                riding.restore();
+                return null;
+            }
+            beforeMove.run();
+            newEntity.restoreFrom(oldEntity);
+            newEntity.setId(oldEntity.getId());
+            McHelper.setPosAndLastTickPos(newEntity, newPos, newPos);
+            McHelper.updateBoundingBox(newEntity);
+            newEntity.setYHeadRot(oldEntity.getYHeadRot());
 
-        if (!detach(oldEntity)) return null;
-        if (!toWorld.addFreshEntity(newEntity)) return null;
-        // TODO check minecart item duplication
-        oldEntity.remove(Entity.RemovalReason.CHANGED_DIMENSION);
-
-        return newEntity;
+            if (!toWorld.addFreshEntity(newEntity)) {
+                riding.restore();
+                return null;
+            }
+            // TODO check minecart item duplication
+            oldEntity.remove(Entity.RemovalReason.CHANGED_DIMENSION);
+            return newEntity;
+        } catch (RuntimeException failure) {
+            if (!oldEntity.isRemoved() && toWorld.getEntity(newEntity.getUUID()) == newEntity) {
+                try {
+                    newEntity.remove(Entity.RemovalReason.DISCARDED);
+                } catch (RuntimeException rollbackFailure) {
+                    if (failure != rollbackFailure) failure.addSuppressed(rollbackFailure);
+                }
+            }
+            riding.restoreAfterFailure(failure);
+            throw failure;
+        }
     }
 
     /** 玩家走forceTeleportPlayer，其余走teleportRegularEntityTo。 */
     public static Entity teleportEntityGeneral(Entity entity, Vec3 targetPos, ServerLevel targetWorld) {
+        return teleportEntityGeneral(entity, targetPos, targetWorld, () -> {});
+    }
+
+    /** 统一传送分派，移动准备只在标准换维和下车均获准后执行一次。 */
+    public static Entity teleportEntityGeneral(Entity entity, Vec3 targetPos, ServerLevel targetWorld,
+                                               Runnable beforeMove) {
         if (entity instanceof ServerPlayer serverPlayer) {
             return of(serverPlayer.server).forceTeleportPlayer(
-                serverPlayer, targetWorld.dimension(), targetPos
+                serverPlayer, targetWorld, targetPos, true, beforeMove
             ) ? entity : null;
         }
         else {
-            return teleportRegularEntityTo(entity, targetWorld.dimension(), targetPos);
+            return teleportRegularEntityTo(entity, targetWorld, targetPos, beforeMove);
         }
     }
 
-    /** 同维普通实体moveTo并同步头转角，跨维把脚底目的地换成眼位传给changeEntityDimension，返回实际新对象。 */
-    @SuppressWarnings("unchecked")
+    /** 解析目标世界并按脚底坐标移动普通实体，返回实际移动对象。 */
     public static <E extends Entity> E teleportRegularEntityTo(
         E entity, ResourceKey<Level> targetDim, Vec3 targetPos
     ) {
-        if (entity.level().dimension() == targetDim) {
-            if (!detach(entity)) return null;
-            entity.moveTo(
-                targetPos.x,
-                targetPos.y,
-                targetPos.z,
-                entity.getYRot(),
-                entity.getXRot()
+        if (!SeamlessTeleportation.isValidTargetPosition(targetPos)) return null;
+        ServerLevel targetWorld = entity.level().dimension() == targetDim
+                ? (ServerLevel) entity.level() : entity.getServer().getLevel(targetDim);
+        if (targetWorld == null) {
+            Shuttershadow.LOGGER.error(
+                "Invalid dest dimension {} to teleport entity {} to",
+                targetDim.location(), entity
             );
-            entity.setYHeadRot(entity.getYRot());
-            return entity;
+            return null;
+        }
+        return teleportRegularEntityTo(entity, targetWorld, targetPos, () -> {});
+    }
+
+    /** 同维直接移动，跨维复用统一事件检查、移动准备和失败恢复流程。 */
+    @SuppressWarnings("unchecked")
+    private static <E extends Entity> E teleportRegularEntityTo(
+        E entity, ServerLevel targetWorld, Vec3 targetPos, Runnable beforeMove
+    ) {
+        if (!SeamlessTeleportation.isValidTargetPosition(targetPos)) return null;
+        if (entity.level() == targetWorld) {
+            RidingState riding = RidingState.capture(entity);
+            try {
+                if (!detach(entity)) {
+                    riding.restore();
+                    return null;
+                }
+                beforeMove.run();
+                entity.moveTo(
+                    targetPos.x,
+                    targetPos.y,
+                    targetPos.z,
+                    entity.getYRot(),
+                    entity.getXRot()
+                );
+                entity.setYHeadRot(entity.getYRot());
+                return entity;
+            } catch (RuntimeException failure) {
+                riding.restoreAfterFailure(failure);
+                throw failure;
+            }
         }
         
         return (E) of(entity.getServer()).changeEntityDimension(
             entity,
-            targetDim,
-            targetPos.add(McHelper.getEyeOffset(entity))
+            targetWorld,
+            targetPos, beforeMove
         );
     }
 

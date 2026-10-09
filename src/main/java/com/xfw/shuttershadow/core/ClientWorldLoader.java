@@ -444,8 +444,6 @@ public class ClientWorldLoader {
         
         LevelRenderer newWorldRenderer = getWorldRenderer(newWorld.dimension());
         
-        Validate.notNull(newWorldRenderer, "new world renderer is null");
-        
         CLIENT.level = newWorld;
         ((IEParticleManager) CLIENT.particleEngine).ip_setWorld(newWorld);
         ((IEMinecraftClient) CLIENT).ip_setWorldRenderer(newWorldRenderer);
